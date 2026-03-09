@@ -2,6 +2,7 @@
 """Go online client - WebSocket connection to server for network play"""
 import pygame
 import pygame.gfxdraw
+import pygame.freetype
 import sys
 import math
 import json
@@ -11,15 +12,44 @@ import websockets
 import queue
 import urllib.request
 import urllib.error
+import urllib.parse
 import time as time_module
+import base64
+import io
+import os
+import pathlib
 
 pygame.init()
+pygame.freetype.init()
+
+# --- Embedded clock panel reference image (AI Shogi style) ---
+_CLOCK_PANEL_PNG_B64 = "iVBORw0KGgoAAAANSUhEUgAAAMoAAABgCAIAAADTgHp3AAABRUlEQVR4nO3cwQnDMBAAQSlcGSkn5aVnu4pFIGYq8GM5nRyT/f99FzRmPc/pZ+Ban9MPwM3kRUhehORFaJbNnszs00/AxRyOhORFSF6ErPaETC9Cbo6ETC9C8iJktSdkehGSFyE3R0KzLF9kHI6E3BwJmV6E5EVIXoS8mCBktSfkcCQkL0LyIiQvQrOt9mRML0LyIiQvQvIi5K09Ib85EvIxNCG7FyF5EZIXITdHQqYXIS8mCJlehORFyGpPyPQiJC9Cbo6ETC9CVntCphcheRGSFyE3R0I+hibk5kjI7kVIXoTkRUhehPy/FyHTi5C8CMmLkLwIeWtPyE/ahByOhORFSF6ErPaETC9Cbo6EfAxNyOFISF6E3BwJmV6E5EXIiwlCphchqz0h04uQvAjJi5CbIyGrPSGHIyF5EZIXIXkRcnMk9AK7bxjq+ki3cAAAAABJRU5ErkJggg=="
+
+# Lazy-loaded after display is created (convert_alpha needs a display surface)
+_clock_panel_base = None
+_clock_panel_cache = {}
+
+def _get_clock_panel_scaled(w, h):
+    """Return the clock panel image scaled to (w, h), cached.
+
+    The base surface is lazily loaded on first call (requires display to exist).
+    """
+    global _clock_panel_base
+    if _clock_panel_base is None:
+        raw = base64.b64decode(_CLOCK_PANEL_PNG_B64)
+        buf = io.BytesIO(raw)
+        _clock_panel_base = pygame.image.load(buf, "panel.png").convert_alpha()
+    key = (w, h)
+    if key not in _clock_panel_cache:
+        _clock_panel_cache[key] = pygame.transform.smoothscale(_clock_panel_base, (w, h))
+    return _clock_panel_cache[key]
 
 BOARD_SIZE = 19
 MENU_BAR_HEIGHT = 26
 INFO_BAR_HEIGHT = 40
 BUTTON_BAR_HEIGHT = 46
-CLOCK_PANEL_WIDTH = 110
+CLOCK_PANEL_WIDTH = 240
+CLOCK_PANEL_GAP = 8  # gap between board edge and clock panel
 STAR_POINTS = [
     (3, 3), (3, 9), (3, 15),
     (9, 3), (9, 9), (9, 15),
@@ -43,17 +73,37 @@ MENU_HOVER_BG = (200, 216, 240)
 MENU_BORDER = (200, 200, 200)
 MENU_TEXT = (0, 0, 0)
 MENU_TEXT_DISABLED = (160, 160, 160)
-CLOCK_BG = (30, 45, 65)
-CLOCK_ACTIVE = (25, 60, 50)
-CLOCK_DANGER = (90, 30, 30)
-CLOCK_BORDER = (60, 80, 110)
-CLOCK_ICON = (180, 200, 220)
+# Clock panel text/icon colors (panel background uses embedded image)
+CLOCK_ICON = (225, 215, 200)    # light icon color
+CLOCK_TEXT = (245, 238, 225)    # white/cream text
+CLOCK_TIME_TEXT = (255, 255, 255)  # bright white time
 
 # Time control presets: (label, main_time_seconds, byoyomi_seconds)
 TIME_PRESETS = [
     ("1\u5206+30\u79d2", 60, 30),
     ("10\u5206+30\u79d2", 600, 30),
 ]
+
+class _FreetypeMenuFont:
+    """Wrapper around pygame.freetype.Font to mimic pygame.font.Font API.
+
+    pygame.font.Font cannot select a face index within TTC files, so it always
+    loads face 0 (e.g. 'Yu Gothic Regular' instead of 'Yu Gothic UI Regular').
+    This wrapper uses pygame.freetype which supports font_index, while exposing
+    the same render() / size() interface expected by MenuBar.
+    """
+
+    def __init__(self, ft_font: pygame.freetype.Font):
+        self._ft = ft_font
+
+    def render(self, text: str, antialias: bool, color: tuple, background: object = None) -> pygame.Surface:
+        surf, _rect = self._ft.render(text, fgcolor=color)
+        return surf
+
+    def size(self, text: str) -> tuple:
+        rect = self._ft.get_rect(text)
+        return (rect.width, rect.height)
+
 
 def _clamp(v):
     return max(0, min(255, int(v)))
@@ -145,7 +195,7 @@ def create_stone_surface(color, diameter):
 
 class Layout:
     def __init__(self, win_w, win_h):
-        usable_w = win_w - CLOCK_PANEL_WIDTH * 2
+        usable_w = win_w - (CLOCK_PANEL_WIDTH + CLOCK_PANEL_GAP) * 2
         board_area = min(usable_w, win_h - MENU_BAR_HEIGHT - INFO_BAR_HEIGHT - BUTTON_BAR_HEIGHT)
         board_area = max(board_area, 100)
         self.margin = max(6, int(board_area * 0.03))
@@ -157,9 +207,9 @@ class Layout:
         self.win_h = win_h
         self.offset_x = (win_w - self.board_px) // 2
         self.offset_y = MENU_BAR_HEIGHT + INFO_BAR_HEIGHT
-        # Clock panel positions
-        self.clock_left_x = self.offset_x - CLOCK_PANEL_WIDTH
-        self.clock_right_x = self.offset_x + self.board_px
+        # Clock panel positions (with gap from board)
+        self.clock_left_x = self.offset_x - CLOCK_PANEL_GAP - CLOCK_PANEL_WIDTH
+        self.clock_right_x = self.offset_x + self.board_px + CLOCK_PANEL_GAP
         self.clock_y = self.offset_y
         self.clock_h = self.board_px
 
@@ -199,7 +249,6 @@ def draw_board(screen, board, black_stone, white_stone, layout):
         pygame.draw.line(screen, LINE_COLOR, (ox + m, y_pos), (ox + m + round((n-1)*cs), y_pos), 1)
         x_pos = ox + m + round(i * cs)
         pygame.draw.line(screen, LINE_COLOR, (x_pos, oy + m), (x_pos, oy + m + round((n-1)*cs)), 1)
-    pygame.draw.rect(screen, LINE_COLOR, (ox + m, oy + m, int((n-1)*cs), int((n-1)*cs)), 2)
     for (r, c) in STAR_POINTS:
         x, y = layout.grid_to_screen(r, c)
         pygame.draw.circle(screen, LINE_COLOR, (x, y), layout.star_radius)
@@ -235,9 +284,14 @@ class MenuBar:
         self.font = font
         self.win_w = win_w
         self.items = [
-            ("\u30b2\u30fc\u30e0", ["\u30d1\u30b9", "\u6295\u4e86", "\u7d42\u4e86"]),
-            ("\u8a2d\u5b9a", ["\u6301\u3061\u6642\u9593: 1\u5206+30\u79d2", "\u6301\u3061\u6642\u9593: 10\u5206+30\u79d2"]),
-            ("\u30d8\u30eb\u30d7", ["\u30d0\u30fc\u30b8\u30e7\u30f3\u60c5\u5831"]),
+            ("\u30d5\u30a1\u30a4\u30eb(F)", ["\u65b0\u898f\u5bfe\u5c40", "\u68cb\u8b5c\u3092\u958b\u304f", "\u68cb\u8b5c\u306e\u4fdd\u5b58", "\u7d42\u4e86"]),
+            ("\u7de8\u96c6(E)", ["\u4e00\u624b\u623b\u3059", "\u3084\u308a\u76f4\u3057", "\u30b3\u30d4\u30fc", "\u8cbc\u308a\u4ed8\u3051"]),
+            ("\u8868\u793a(V)", ["\u5ea7\u6a19\u8868\u793a", "\u6700\u7d42\u624b\u8868\u793a"]),
+            ("\u5bfe\u5c40(P)", ["\u30d1\u30b9", "\u6295\u4e86", "\u4e2d\u65ad"]),
+            ("\u5b9a\u77f3(J)", ["\u5b9a\u77f3\u4e00\u89a7"]),
+            ("\u5c40\u9762\u7de8\u96c6(B)", ["\u5c40\u9762\u7de8\u96c6"]),
+            ("\u30c4\u30fc\u30eb(T)", ["\u6301\u3061\u6642\u9593: 1\u5206+30\u79d2", "\u6301\u3061\u6642\u9593: 10\u5206+30\u79d2"]),
+            ("\u30d8\u30eb\u30d7(H)", ["\u30d0\u30fc\u30b8\u30e7\u30f3\u60c5\u5831"]),
         ]
         self.open_menu = -1  # which top-level menu is open (-1 = none)
         self.hover_item = -1  # which dropdown item is hovered
@@ -331,7 +385,7 @@ class MenuBar:
             if self.hover_item == j:
                 pygame.draw.rect(screen, MENU_HOVER_BG, rect)
             display = sub
-            if mi == 1 and j < len(TIME_PRESETS):
+            if mi == 6 and j < len(TIME_PRESETS):
                 if j == time_preset_idx:
                     display = "\u2714 " + sub
             ts = self.font.render(display, True, MENU_TEXT)
@@ -361,130 +415,225 @@ def format_time_hms(seconds):
     h = s // 3600
     m = (s % 3600) // 60
     sec = s % 60
-    return f"{h}:{m:02d}:{sec:02d}"
+    return f"{h:02d}:{m:02d}:{sec:02d}"
 
 def draw_clock_icon(screen, cx, cy, radius, color):
-    """Draw a small clock/stopwatch icon."""
-    pygame.draw.circle(screen, color, (cx, cy), radius, 2)
-    # Hour hand
-    pygame.draw.line(screen, color, (cx, cy), (cx, cy - radius + 3), 2)
-    # Minute hand
-    pygame.draw.line(screen, color, (cx, cy), (cx + radius - 4, cy), 2)
-    # Center dot
-    pygame.draw.circle(screen, color, (cx, cy), 2)
+    """Draw a small stopwatch icon with anti-aliased circles — bold/thick style."""
+    # Use a 4x supersampled surface for smooth, bold rendering
+    scale = 4
+    sr = radius * scale
+    sz = (radius + 5) * 2 * scale
+    tmp = pygame.Surface((sz, sz), pygame.SRCALPHA)
+    tcx = sz // 2
+    tcy = sz // 2 + 2 * scale
+    lw = max(2, scale)  # line width at supersampled scale (bold)
 
-def draw_clock_panel(screen, font, small_font, layout, side, player_name,
-                     main_time, in_byoyomi, byoyomi_remaining,
-                     is_active, my_color_is_this):
-    """Draw a clock panel in AI Shogi style on the left or right side."""
+    # Thick circle outline — fill a ring
+    outer_r = sr
+    inner_r = max(1, sr - lw * 2)
+    for ri in range(inner_r, outer_r + 1):
+        pygame.gfxdraw.aacircle(tmp, tcx, tcy, ri, color)
+    # Also fill to make it solid
+    pygame.gfxdraw.filled_circle(tmp, tcx, tcy, outer_r, color)
+    # Cut out the interior to form a ring (transparent center)
+    interior = max(1, sr - lw * 2 - 1)
+    pygame.gfxdraw.filled_circle(tmp, tcx, tcy, interior, (0, 0, 0, 0))
+
+    # Top bar (thick)
+    bar_w = lw * 2
+    pygame.draw.line(tmp, color, (tcx - 4 * scale, tcy - sr - 2 * scale),
+                     (tcx + 4 * scale, tcy - sr - 2 * scale), bar_w)
+    # Hands (thick)
+    pygame.draw.line(tmp, color, (tcx, tcy), (tcx, tcy - sr + 4 * scale), bar_w)
+    pygame.draw.line(tmp, color, (tcx, tcy), (tcx + sr - 5 * scale, tcy), bar_w)
+    # Center dot (bold)
+    dot_r = max(2, lw)
+    pygame.gfxdraw.aacircle(tmp, tcx, tcy, dot_r, color)
+    pygame.gfxdraw.filled_circle(tmp, tcx, tcy, dot_r, color)
+
+    # Scale down with smoothscale for anti-aliasing
+    final_sz = sz // scale
+    small = pygame.transform.smoothscale(tmp, (final_sz, final_sz))
+    screen.blit(small, (cx - final_sz // 2, cy - final_sz // 2 + 1))
+
+
+def _draw_stone_icon(surface, cx, cy, radius, color):
+    """Draw a small go stone icon with natural gloss using radial gradient on a mask."""
+    # Use 4x supersampled surface for smooth edges
+    scale = 4
+    sr = radius * scale
+    sz = (radius + 2) * 2 * scale
+    tcx = sz // 2
+    tcy = sz // 2
+
+    # Base stone surface
+    tmp = pygame.Surface((sz, sz), pygame.SRCALPHA)
+
+    if color == "black":
+        # Draw base stone
+        pygame.gfxdraw.aacircle(tmp, tcx, tcy, sr, (30, 30, 30, 255))
+        pygame.gfxdraw.filled_circle(tmp, tcx, tcy, sr, (30, 30, 30, 255))
+        # Gloss overlay: draw a radial gradient on a separate surface, then mask
+        gloss = pygame.Surface((sz, sz), pygame.SRCALPHA)
+        hl_cx = tcx - int(sr * 0.28)
+        hl_cy = tcy - int(sr * 0.28)
+        hl_r = int(sr * 0.55)
+        for i in range(hl_r, 0, -1):
+            t = 1.0 - (i / hl_r)  # 0 at edge, 1 at center
+            val = int(30 + t * 60)  # 30 -> 90
+            a = int(t * t * 180)    # quadratic falloff for soft edge
+            pygame.gfxdraw.filled_circle(gloss, hl_cx, hl_cy, i, (val, val, val, a))
+        # Mask gloss to stone circle
+        mask = pygame.Surface((sz, sz), pygame.SRCALPHA)
+        pygame.gfxdraw.filled_circle(mask, tcx, tcy, sr, (255, 255, 255, 255))
+        gloss.blit(mask, (0, 0), special_flags=pygame.BLEND_RGBA_MIN)
+        tmp.blit(gloss, (0, 0))
+    else:
+        # Draw base white stone — slightly smaller radius to match black stone visual size
+        wr = sr - scale * 3
+        for i in range(wr, 0, -1):
+            t = i / wr  # 1.0 at edge, 0.0 at center
+            val = int(240 - t * 20)  # 220 at edge -> 240 at center
+            pygame.gfxdraw.filled_circle(tmp, tcx, tcy, i, (val, val, val, 255))
+        pygame.gfxdraw.aacircle(tmp, tcx, tcy, wr, (210, 210, 210, 255))
+        # Gloss highlight
+        gloss = pygame.Surface((sz, sz), pygame.SRCALPHA)
+        hl_cx = tcx - int(sr * 0.24)
+        hl_cy = tcy - int(sr * 0.24)
+        hl_r = int(wr * 0.5)
+        for i in range(hl_r, 0, -1):
+            t = 1.0 - (i / hl_r)
+            val = int(235 + t * 20)  # 235 -> 255
+            a = int(t * t * 160)
+            pygame.gfxdraw.filled_circle(gloss, hl_cx, hl_cy, i, (val, val, val, a))
+        mask = pygame.Surface((sz, sz), pygame.SRCALPHA)
+        pygame.gfxdraw.filled_circle(mask, tcx, tcy, wr, (255, 255, 255, 255))
+        gloss.blit(mask, (0, 0), special_flags=pygame.BLEND_RGBA_MIN)
+        tmp.blit(gloss, (0, 0))
+
+    # Scale down with smoothscale for anti-aliasing
+    final_sz = sz // scale
+    small = pygame.transform.smoothscale(tmp, (final_sz, final_sz))
+    surface.blit(small, (cx - final_sz // 2, cy - final_sz // 2))
+
+
+def _draw_3d_wood_panel(screen, rect):
+    """Draw a warm wood panel with subtle 3D edge — natural look, no heavy border.
+
+    Structure:
+      - 1px thin dark edge
+      - 1px subtle highlight on top/left, shadow on bottom/right
+      - Smooth warm brown gradient fill
+    """
+    x, y, w, h = rect.x, rect.y, rect.width, rect.height
+
+    # 1px thin dark border
+    pygame.draw.rect(screen, (90, 45, 20), rect, 1)
+
+    # Subtle 1px bevel just inside the border
+    # Top highlight
+    pygame.draw.line(screen, (165, 90, 55), (x + 1, y + 1), (x + w - 2, y + 1))
+    # Left highlight
+    pygame.draw.line(screen, (160, 85, 50), (x + 1, y + 1), (x + 1, y + h - 2))
+    # Bottom shadow
+    pygame.draw.line(screen, (100, 42, 18), (x + 1, y + h - 2), (x + w - 2, y + h - 2))
+    # Right shadow
+    pygame.draw.line(screen, (105, 45, 20), (x + w - 2, y + 1), (x + w - 2, y + h - 2))
+
+    # Main gradient fill (inside the 2px frame)
+    ix = x + 2
+    iy = y + 2
+    iw = w - 4
+    ih = h - 4
+    for row in range(ih):
+        t = row / max(1, ih - 1)
+        # Warm brown: top (142, 66, 30) -> bottom (152, 58, 26)
+        r = int(142 + t * 10)
+        g = int(66 - t * 8)
+        b = int(30 - t * 4)
+        pygame.draw.line(screen, (r, g, b), (ix, iy + row), (ix + iw - 1, iy + row))
+
+
+def _draw_icon_box(screen, cx, cy, size, stone_color):
+    """Draw a go stone icon without background box — just the stone on the panel."""
+    stone_r = max(5, size // 2 - 1)
+    _draw_stone_icon(screen, cx, cy, stone_r, stone_color)
+
+
+def draw_clock_panel(screen, font, small_font, clock_font, clock_name_font,
+                     layout, side, player_name, main_time, in_byoyomi,
+                     byoyomi_remaining, is_active, my_color_is_this):
+    """Draw the clock panel with warm wood background (AI Shogi style).
+
+    Layout matching reference:
+      Row 1: [icon box]  Player Name       (small, regular weight)
+      Row 2: [clock icon]     HH:MM:SS    (larger, right-positioned)
+    """
     if side == "left":
         px = max(0, layout.clock_left_x)
-        pw = layout.offset_x - px
+        pw = layout.offset_x - CLOCK_PANEL_GAP - px
     else:
         px = layout.clock_right_x
         pw = min(layout.win_w, px + CLOCK_PANEL_WIDTH) - px
 
-    py = layout.clock_y + 20
-    ph = min(200, layout.clock_h - 40)
+    # Panel aspect ratio matching reference (218 x 109 ~ 1:0.5)
+    aspect = 109.0 / 218.0
+    ph = max(70, int(pw * aspect))
+    ph = min(ph, layout.clock_h - 10)
+    py = layout.clock_y + (layout.clock_h - ph) // 2
 
-    if pw < 30:
+    if pw < 40:
         return
 
-    # Background color based on state
-    if is_active:
-        if in_byoyomi and byoyomi_remaining < 10:
-            bg = CLOCK_DANGER
+    panel_rect = pygame.Rect(px, py, pw, ph)
+
+    # Draw the wood panel background
+    _draw_3d_wood_panel(screen, panel_rect)
+
+    # Content area (inside the thin frame)
+    cx0 = panel_rect.x + 4
+    cy0 = panel_rect.y + 4
+    cw = pw - 8
+    ch = ph - 8
+
+    # --- Row 1: Icon box + Player name (upper portion) ---
+    row1_cy = cy0 + int(ch * 0.28)
+    box_size = max(18, int(ch * 0.36))
+    box_cx = cx0 + 18 + box_size // 2
+    stone_color = "black" if side == "left" else "white"
+    _draw_icon_box(screen, box_cx, row1_cy, box_size, stone_color)
+
+    # Player name: left-aligned, slightly left of center
+    text_left_x = cx0 + 18 + box_size + 10
+    max_name_w = panel_rect.right - text_left_x - 4
+    name_display = player_name
+    while clock_name_font.size(name_display)[0] > max_name_w and len(name_display) > 3:
+        name_display = name_display[:-1]
+    name_surf = clock_name_font.render(name_display, True, CLOCK_TEXT)
+    screen.blit(name_surf, name_surf.get_rect(midleft=(text_left_x, row1_cy)))
+
+    # --- Row 2: Clock icon + Time (lower portion) ---
+    row2_cy = cy0 + int(ch * 0.68)
+    icon_r = max(9, int(ch * 0.13))
+    draw_clock_icon(screen, box_cx, row2_cy, icon_r, CLOCK_ICON)
+
+    # Time display: left-aligned with player name
+    if in_byoyomi:
+        time_str = format_time_hms(byoyomi_remaining)
+        if byoyomi_remaining < 10:
+            time_color = (255, 100, 80)
         else:
-            bg = CLOCK_ACTIVE
+            time_color = CLOCK_TIME_TEXT
     else:
-        bg = CLOCK_BG
-
-    panel_rect = pygame.Rect(px + 2, py, pw - 4, ph)
-
-    # Draw panel with gradient effect (top lighter, bottom darker)
-    for i in range(ph):
-        t = i / max(1, ph - 1)
-        r_val = max(0, min(255, int(bg[0] + 15 * (1 - t))))
-        g_val = max(0, min(255, int(bg[1] + 15 * (1 - t))))
-        b_val = max(0, min(255, int(bg[2] + 15 * (1 - t))))
-        pygame.draw.line(screen, (r_val, g_val, b_val),
-                         (panel_rect.x, panel_rect.y + i),
-                         (panel_rect.x + panel_rect.w, panel_rect.y + i))
-    # Rounded border
-    pygame.draw.rect(screen, CLOCK_BORDER, panel_rect, 2, border_radius=6)
-
-    cx = panel_rect.centerx
-    cy = py + 16
-
-    # Stone indicator (small label box like AI Shogi "先"/"後")
-    label_w = 24
-    label_h = 20
-    label_rect = pygame.Rect(cx - label_w // 2, cy - label_h // 2, label_w, label_h)
-    if side == "left":
-        stone_bg = (20, 20, 20)
-        stone_border = (80, 80, 80)
-        stone_text_color = (240, 240, 240)
-    else:
-        stone_bg = (220, 220, 220)
-        stone_border = (160, 160, 160)
-        stone_text_color = (20, 20, 20)
-    pygame.draw.rect(screen, stone_bg, label_rect, border_radius=3)
-    pygame.draw.rect(screen, stone_border, label_rect, 1, border_radius=3)
-    # "先"/"後" style label
-    label_char = "\u25cf" if side == "left" else "\u25cb"
-    lbl_surf = small_font.render(label_char, True, stone_text_color)
-    screen.blit(lbl_surf, lbl_surf.get_rect(center=label_rect.center))
-
-    cy += 18
-
-    # Player name
-    name_text = small_font.render(player_name[:10], True, (220, 230, 240))
-    screen.blit(name_text, name_text.get_rect(center=(cx, cy)))
-    cy += 20
-
-    # Clock icon + main time (AI Shogi style)
-    icon_r = 8
-    icon_cx = panel_rect.x + 14
-    icon_cy = cy
-    draw_clock_icon(screen, icon_cx, icon_cy, icon_r, CLOCK_ICON)
-
-    # Main time display in H:MM:SS
-    if not in_byoyomi:
         time_str = format_time_hms(main_time)
         if main_time <= 10:
-            time_color = (255, 80, 80)
+            time_color = (255, 100, 80)
         elif main_time <= 30:
             time_color = (255, 200, 80)
         else:
-            time_color = WHITE
-    else:
-        time_str = "0:00:00"
-        time_color = (120, 120, 120)
-    time_surf = font.render(time_str, True, time_color)
-    time_x = icon_cx + icon_r + 6
-    screen.blit(time_surf, (time_x, cy - time_surf.get_height() // 2))
-    cy += 28
-
-    # Byoyomi section
-    if in_byoyomi:
-        byo_label = small_font.render("\u79d2\u8aad\u307f", True, YELLOW)
-        screen.blit(byo_label, byo_label.get_rect(center=(cx, cy)))
-        cy += 18
-        byo_str = format_time_hms(byoyomi_remaining)
-        if byoyomi_remaining < 10:
-            byo_color = (255, 80, 80)
-        else:
-            byo_color = YELLOW
-        # Clock icon for byoyomi
-        draw_clock_icon(screen, icon_cx, cy, icon_r, byo_color)
-        byo_surf = font.render(byo_str, True, byo_color)
-        screen.blit(byo_surf, (time_x, cy - byo_surf.get_height() // 2))
-    else:
-        byo_label = small_font.render("\u79d2\u8aad\u307f", True, (90, 100, 110))
-        screen.blit(byo_label, byo_label.get_rect(center=(cx, cy)))
-        cy += 18
-        byo_surf = small_font.render("--:--", True, (90, 100, 110))
-        screen.blit(byo_surf, byo_surf.get_rect(center=(cx, cy)))
+            time_color = CLOCK_TIME_TEXT
+    time_surf = clock_font.render(time_str, True, time_color)
+    screen.blit(time_surf, time_surf.get_rect(midleft=(text_left_x, row2_cy + 2)))
 
 
 # --------------- WebSocket client (runs in background thread) ---------------
@@ -515,7 +664,8 @@ class NetworkClient:
         """Call /find_match HTTP endpoint to get room_code and instance_id."""
         http_url = server_url.replace("wss://", "https://").replace("ws://", "http://")
         mt, byo = self.time_control
-        url = f"{http_url}/find_match?name={player_name}&main_time={mt}&byoyomi={byo}"
+        encoded_name = urllib.parse.quote(player_name, safe="")
+        url = f"{http_url}/find_match?name={encoded_name}&main_time={mt}&byoyomi={byo}"
         req = urllib.request.Request(url, method="POST")
         req.add_header("Content-Type", "application/json")
         try:
@@ -551,7 +701,7 @@ class NetworkClient:
             self.connected = False
             return
 
-        url = f"{server_url}/ws/{room_code}/{player_name}"
+        url = f"{server_url}/ws/{room_code}/{urllib.parse.quote(player_name, safe='')}"
         extra_headers = {}
         if instance_id and instance_id != "local":
             extra_headers["fly-force-instance-id"] = instance_id
@@ -594,19 +744,408 @@ class NetworkClient:
             except Exception:
                 break
 
+# --------------- Credential Storage ---------------
+
+_CRED_FILE = pathlib.Path.home() / ".igo_credentials.json"
+
+
+def _load_credentials():
+    """Load saved credentials from file. Returns dict or None."""
+    try:
+        if _CRED_FILE.exists():
+            data = json.loads(_CRED_FILE.read_text(encoding="utf-8"))
+            if data.get("nickname") and data.get("password"):
+                return data
+    except Exception:
+        pass
+    return None
+
+
+def _save_credentials(nickname, password, name=""):
+    """Save credentials to file for auto-login."""
+    try:
+        _CRED_FILE.write_text(json.dumps({
+            "nickname": nickname,
+            "password": password,
+            "name": name,
+        }, ensure_ascii=False), encoding="utf-8")
+    except Exception:
+        pass
+
+
+def _clear_credentials():
+    """Remove saved credentials."""
+    try:
+        if _CRED_FILE.exists():
+            _CRED_FILE.unlink()
+    except Exception:
+        pass
+
+
+def _http_post_json(url, data):
+    """Send a POST request with JSON body and return parsed response."""
+    body = json.dumps(data, ensure_ascii=False).encode("utf-8")
+    req = urllib.request.Request(url, data=body, method="POST")
+    req.add_header("Content-Type", "application/json")
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        try:
+            return json.loads(e.read().decode("utf-8"))
+        except Exception:
+            return {"ok": False, "error": f"HTTP {e.code}"}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+# --------------- Auth Screen (Register / Login) ---------------
+
+def _draw_text_field(screen, font, rect, text, active, cursor_blink, ime_text=""):
+    """Draw a text input field with optional IME composition underline."""
+    color = INPUT_ACTIVE if active else INPUT_BG
+    pygame.draw.rect(screen, color, rect, border_radius=4)
+    pygame.draw.rect(screen, WHITE, rect, 1, border_radius=4)
+    ime_show = ime_text if active else ""
+    cursor = "|" if active and cursor_blink < 30 and not ime_show else ""
+    display_text = text + ime_show + cursor
+    ts = font.render(display_text, True, WHITE)
+    screen.blit(ts, (rect.x + 8, rect.y + 8))
+    if ime_show:
+        comp_x = rect.x + 8 + font.size(text)[0]
+        comp_w = font.size(ime_show)[0]
+        comp_y = rect.y + 30
+        pygame.draw.line(screen, YELLOW, (comp_x, comp_y), (comp_x + comp_w, comp_y), 2)
+
+
+def _draw_password_field(screen, font, rect, text, active, cursor_blink, ime_text=""):
+    """Draw a password field (shows dots instead of text)."""
+    color = INPUT_ACTIVE if active else INPUT_BG
+    pygame.draw.rect(screen, color, rect, border_radius=4)
+    pygame.draw.rect(screen, WHITE, rect, 1, border_radius=4)
+    ime_show = ime_text if active else ""
+    cursor = "|" if active and cursor_blink < 30 and not ime_show else ""
+    masked = "\u25cf" * len(text) + ime_show + cursor
+    ts = font.render(masked, True, WHITE)
+    screen.blit(ts, (rect.x + 8, rect.y + 8))
+
+
+def auth_screen(screen, font, btn_font, server_base_url):
+    """Registration / Login screen. Returns (nickname, name) or None if quit."""
+    clock = pygame.time.Clock()
+    http_url = server_base_url.replace("wss://", "https://").replace("ws://", "http://")
+
+    # Try auto-login with saved credentials
+    saved = _load_credentials()
+    if saved:
+        result = _http_post_json(f"{http_url}/login", {
+            "nickname": saved["nickname"],
+            "password": saved["password"],
+        })
+        if result.get("ok"):
+            return (result["nickname"], result.get("name", saved.get("name", "")))
+        # Saved credentials invalid, clear them
+        _clear_credentials()
+
+    # State
+    mode = "login"  # "login" or "register"
+    # Register fields: name, nickname, password
+    reg_name = ""
+    reg_nickname = ""
+    reg_password = ""
+    # Login fields: nickname, password
+    login_nickname = ""
+    login_password = ""
+    # UI state
+    active_field = 0  # which field is focused
+    cursor_blink = 0
+    ime_composing = ""
+    save_creds = True  # checkbox: save credentials
+    message = ""  # status/error message
+    message_color = RED
+    message_timer = 0
+
+    pygame.key.start_text_input()
+
+    def get_fields():
+        if mode == "register":
+            return [reg_name, reg_nickname, reg_password]
+        else:
+            return [login_nickname, login_password]
+
+    def set_field(idx, val):
+        nonlocal reg_name, reg_nickname, reg_password, login_nickname, login_password
+        if mode == "register":
+            if idx == 0: reg_name = val
+            elif idx == 1: reg_nickname = val
+            elif idx == 2: reg_password = val
+        else:
+            if idx == 0: login_nickname = val
+            elif idx == 1: login_password = val
+
+    def field_count():
+        return 3 if mode == "register" else 2
+
+    def commit_ime():
+        """Commit any pending IME composition text to the current field."""
+        nonlocal ime_composing
+        if ime_composing:
+            fields = get_fields()
+            if active_field < len(fields):
+                set_field(active_field, fields[active_field] + ime_composing)
+            ime_composing = ""
+
+    def switch_field(new_idx):
+        """Switch active field, committing any IME composition first."""
+        nonlocal active_field
+        commit_ime()
+        active_field = new_idx
+
+    while True:
+        was_composing = bool(ime_composing)  # remember if IME was active before this frame
+        ime_confirmed = False  # flag: IME composition was just confirmed this frame
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.key.stop_text_input()
+                return None
+            elif event.type == pygame.VIDEORESIZE:
+                nw = max(500, event.w)
+                nh = max(400, event.h)
+                screen = pygame.display.set_mode((nw, nh), pygame.RESIZABLE)
+            elif event.type == pygame.TEXTINPUT:
+                fields = get_fields()
+                if active_field < len(fields):
+                    set_field(active_field, fields[active_field] + event.text)
+                if ime_composing or was_composing:
+                    ime_confirmed = True  # Enter was used to confirm IME, don't submit
+                ime_composing = ""
+            elif event.type == pygame.TEXTEDITING:
+                ime_composing = event.text
+            elif event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_TAB:
+                    switch_field((active_field + 1) % field_count())
+                elif event.key == pygame.K_RETURN:
+                    if ime_composing or ime_confirmed or was_composing:
+                        # IME was active — just confirm composition, don't submit
+                        commit_ime()
+                    else:
+                        # No IME — submit the form
+                        commit_ime()  # flush any residual
+                        if mode == "register":
+                            result = _http_post_json(f"{http_url}/register", {
+                                "name": reg_name, "nickname": reg_nickname, "password": reg_password,
+                            })
+                            if result.get("ok"):
+                                # Registration success -> switch to login with credentials carried over
+                                login_nickname = reg_nickname
+                                login_password = reg_password
+                                mode = "login"
+                                active_field = 0
+                                message = "\u767b\u9332\u6210\u529f\uff01\u30ed\u30b0\u30a4\u30f3\u3057\u3066\u304f\u3060\u3055\u3044"  # 登録成功！ログインしてください
+                                message_color = GREEN
+                                message_timer = 180
+                            else:
+                                message = result.get("error", "\u767b\u9332\u5931\u6557")
+                                message_color = RED
+                                message_timer = 120
+                        else:
+                            result = _http_post_json(f"{http_url}/login", {
+                                "nickname": login_nickname, "password": login_password,
+                            })
+                            if result.get("ok"):
+                                if save_creds:
+                                    _save_credentials(login_nickname, login_password, result.get("name", ""))
+                                pygame.key.stop_text_input()
+                                return (result["nickname"], result.get("name", ""))
+                            else:
+                                message = result.get("error", "\u30ed\u30b0\u30a4\u30f3\u5931\u6557")
+                                message_color = RED
+                                message_timer = 120
+                elif event.key == pygame.K_BACKSPACE:
+                    if not ime_composing:
+                        fields = get_fields()
+                        if active_field < len(fields):
+                            set_field(active_field, fields[active_field][:-1])
+            elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                mx, my = event.pos
+                w, h = screen.get_size()
+                cx = w // 2
+                # Tab buttons
+                login_tab_rect = pygame.Rect(cx - 160, 80, 155, 36)
+                reg_tab_rect = pygame.Rect(cx + 5, 80, 155, 36)
+                if login_tab_rect.collidepoint(mx, my):
+                    commit_ime()
+                    mode = "login"
+                    active_field = 0
+                    ime_composing = ""
+                    message = ""
+                elif reg_tab_rect.collidepoint(mx, my):
+                    commit_ime()
+                    mode = "register"
+                    active_field = 0
+                    ime_composing = ""
+                    message = ""
+                # Field clicks
+                base_y = 140
+                for fi in range(field_count()):
+                    field_rect = pygame.Rect(cx - 160, base_y + fi * 70 + 22, 320, 35)
+                    if field_rect.collidepoint(mx, my):
+                        if fi != active_field:
+                            switch_field(fi)
+                # Save checkbox
+                cb_y = base_y + field_count() * 70 + 5
+                cb_rect = pygame.Rect(cx - 160, cb_y, 20, 20)
+                if cb_rect.collidepoint(mx, my):
+                    save_creds = not save_creds
+                # Submit button
+                submit_y = cb_y + 40
+                submit_rect = pygame.Rect(cx - 80, submit_y, 160, 40)
+                if submit_rect.collidepoint(mx, my):
+                    commit_ime()  # flush any pending IME text before submit
+                    if mode == "register":
+                        result = _http_post_json(f"{http_url}/register", {
+                            "name": reg_name, "nickname": reg_nickname, "password": reg_password,
+                        })
+                        if result.get("ok"):
+                            # Registration success -> switch to login with credentials carried over
+                            login_nickname = reg_nickname
+                            login_password = reg_password
+                            mode = "login"
+                            active_field = 0
+                            message = "\u767b\u9332\u6210\u529f\uff01\u30ed\u30b0\u30a4\u30f3\u3057\u3066\u304f\u3060\u3055\u3044"  # 登録成功！ログインしてください
+                            message_color = GREEN
+                            message_timer = 180
+                        else:
+                            message = result.get("error", "\u767b\u9332\u5931\u6557")
+                            message_color = RED
+                            message_timer = 120
+                    else:
+                        result = _http_post_json(f"{http_url}/login", {
+                            "nickname": login_nickname, "password": login_password,
+                        })
+                        if result.get("ok"):
+                            if save_creds:
+                                _save_credentials(login_nickname, login_password, result.get("name", ""))
+                            pygame.key.stop_text_input()
+                            return (result["nickname"], result.get("name", ""))
+                        else:
+                            message = result.get("error", "\u30ed\u30b0\u30a4\u30f3\u5931\u6557")
+                            message_color = RED
+                            message_timer = 120
+                # Skip button (guest)
+                skip_y = submit_y + 50
+                skip_rect = pygame.Rect(cx - 80, skip_y, 160, 32)
+                if skip_rect.collidepoint(mx, my):
+                    pygame.key.stop_text_input()
+                    return ("Guest", "Guest")
+
+        # --- Draw ---
+        w, h = screen.get_size()
+        cx = w // 2
+        screen.fill(BG_DARK)
+        cursor_blink = (cursor_blink + 1) % 60
+
+        # Title
+        title = font.render("\u56f2\u7881\u30aa\u30f3\u30e9\u30a4\u30f3", True, WHITE)
+        screen.blit(title, title.get_rect(center=(cx, 40)))
+
+        # Tabs
+        login_tab_rect = pygame.Rect(cx - 160, 80, 155, 36)
+        reg_tab_rect = pygame.Rect(cx + 5, 80, 155, 36)
+        if mode == "login":
+            pygame.draw.rect(screen, (70, 130, 200), login_tab_rect, border_radius=5)
+            pygame.draw.rect(screen, BUTTON_COLOR, reg_tab_rect, border_radius=5)
+        else:
+            pygame.draw.rect(screen, BUTTON_COLOR, login_tab_rect, border_radius=5)
+            pygame.draw.rect(screen, (70, 130, 200), reg_tab_rect, border_radius=5)
+        lt = btn_font.render("\u30ed\u30b0\u30a4\u30f3", True, WHITE)
+        rt = btn_font.render("\u65b0\u898f\u767b\u9332", True, WHITE)
+        screen.blit(lt, lt.get_rect(center=login_tab_rect.center))
+        screen.blit(rt, rt.get_rect(center=reg_tab_rect.center))
+
+        # Fields
+        base_y = 140
+        if mode == "register":
+            labels = ["\u540d\u524d:", "\u30cb\u30c3\u30af\u30cd\u30fc\u30e0:", "\u30d1\u30b9\u30ef\u30fc\u30c9:"]
+            fields = [reg_name, reg_nickname, reg_password]
+        else:
+            labels = ["\u30cb\u30c3\u30af\u30cd\u30fc\u30e0:", "\u30d1\u30b9\u30ef\u30fc\u30c9:"]
+            fields = [login_nickname, login_password]
+
+        for fi, (label, val) in enumerate(zip(labels, fields)):
+            lbl = btn_font.render(label, True, WHITE)
+            screen.blit(lbl, (cx - 160, base_y + fi * 70))
+            field_rect = pygame.Rect(cx - 160, base_y + fi * 70 + 22, 320, 35)
+            is_password = (label == "\u30d1\u30b9\u30ef\u30fc\u30c9:")
+            if is_password:
+                _draw_password_field(screen, btn_font, field_rect, val,
+                                     active_field == fi, cursor_blink,
+                                     ime_composing if active_field == fi else "")
+            else:
+                _draw_text_field(screen, btn_font, field_rect, val,
+                                 active_field == fi, cursor_blink,
+                                 ime_composing if active_field == fi else "")
+
+        # Save checkbox
+        cb_y = base_y + field_count() * 70 + 5
+        cb_rect = pygame.Rect(cx - 160, cb_y, 20, 20)
+        pygame.draw.rect(screen, INPUT_BG, cb_rect, border_radius=3)
+        pygame.draw.rect(screen, WHITE, cb_rect, 1, border_radius=3)
+        if save_creds:
+            # Draw checkmark
+            pygame.draw.line(screen, GREEN, (cb_rect.x + 4, cb_rect.y + 10),
+                             (cb_rect.x + 8, cb_rect.y + 16), 2)
+            pygame.draw.line(screen, GREEN, (cb_rect.x + 8, cb_rect.y + 16),
+                             (cb_rect.x + 16, cb_rect.y + 4), 2)
+        cb_label = btn_font.render("\u30ed\u30b0\u30a4\u30f3\u60c5\u5831\u3092\u4fdd\u5b58\uff08\u6b21\u56de\u304b\u3089\u30b9\u30ad\u30c3\u30d7\uff09", True, (200, 200, 200))
+        screen.blit(cb_label, (cb_rect.right + 8, cb_y + 2))
+
+        # Submit button
+        submit_y = cb_y + 40
+        submit_rect = pygame.Rect(cx - 80, submit_y, 160, 40)
+        mx_h, my_h = pygame.mouse.get_pos()
+        btn_color = GREEN if submit_rect.collidepoint(mx_h, my_h) else (60, 160, 60)
+        pygame.draw.rect(screen, btn_color, submit_rect, border_radius=6)
+        submit_label = "\u767b\u9332" if mode == "register" else "\u30ed\u30b0\u30a4\u30f3"
+        submit_text = font.render(submit_label, True, WHITE)
+        screen.blit(submit_text, submit_text.get_rect(center=submit_rect.center))
+
+        # Skip (guest) button
+        skip_y = submit_y + 50
+        skip_rect = pygame.Rect(cx - 80, skip_y, 160, 32)
+        skip_color = (80, 80, 80) if not skip_rect.collidepoint(mx_h, my_h) else (110, 110, 110)
+        pygame.draw.rect(screen, skip_color, skip_rect, border_radius=5)
+        skip_text = btn_font.render("\u30b2\u30b9\u30c8\u3067\u30d7\u30ec\u30a4", True, (180, 180, 180))
+        screen.blit(skip_text, skip_text.get_rect(center=skip_rect.center))
+
+        # Message
+        if message and message_timer > 0:
+            msg_surf = btn_font.render(message, True, message_color)
+            screen.blit(msg_surf, msg_surf.get_rect(center=(cx, skip_y + 50)))
+            message_timer -= 1
+
+        pygame.display.flip()
+        clock.tick(30)
+
+
 # --------------- Connection Screen ---------------
 
-def connection_screen(screen, font, btn_font):
+def connection_screen(screen, font, btn_font, nickname="Player"):
     clock = pygame.time.Clock()
     server_url = "wss://app-aiszfyoe.fly.dev"
-    player_name = "Player"
+    player_name = nickname
     active_field = 0
     cursor_blink = 0
     time_preset_idx = 0  # default: 1min + 30sec
+    ime_composing = ""  # IME composition string (before confirmation)
+
+    # Enable text input for IME support (Japanese kanji input etc.)
+    pygame.key.start_text_input()
 
     while True:
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
+                pygame.key.stop_text_input()
                 return None
             elif event.type == pygame.VIDEORESIZE:
                 nw = max(500, event.w)
@@ -631,24 +1170,31 @@ def connection_screen(screen, font, btn_font):
                 # Connect button
                 connect_rect = pygame.Rect(cx - 80, h // 2 + 110, 160, 40)
                 if connect_rect.collidepoint(mx, my):
+                    pygame.key.stop_text_input()
                     return (server_url, player_name, time_preset_idx)
+            elif event.type == pygame.TEXTINPUT:
+                # IME confirmed text or direct ASCII input
+                if active_field == 0:
+                    server_url += event.text
+                else:
+                    player_name += event.text
+                ime_composing = ""
+            elif event.type == pygame.TEXTEDITING:
+                # IME composing (e.g. showing候補 before Enter)
+                ime_composing = event.text
             elif event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_TAB:
                     active_field = 1 - active_field
                 elif event.key == pygame.K_RETURN:
-                    return (server_url, player_name, time_preset_idx)
+                    if not ime_composing:
+                        pygame.key.stop_text_input()
+                        return (server_url, player_name, time_preset_idx)
                 elif event.key == pygame.K_BACKSPACE:
-                    if active_field == 0:
-                        server_url = server_url[:-1]
-                    else:
-                        player_name = player_name[:-1]
-                else:
-                    ch = event.unicode
-                    if ch and ch.isprintable():
+                    if not ime_composing:
                         if active_field == 0:
-                            server_url += ch
+                            server_url = server_url[:-1]
                         else:
-                            player_name += ch
+                            player_name = player_name[:-1]
 
         w, h = screen.get_size()
         cx = w // 2
@@ -667,9 +1213,17 @@ def connection_screen(screen, font, btn_font):
         pygame.draw.rect(screen, color1, field_rect1, border_radius=4)
         pygame.draw.rect(screen, WHITE, field_rect1, 1, border_radius=4)
         cursor_blink = (cursor_blink + 1) % 60
-        url_text = server_url + ("|" if active_field == 0 and cursor_blink < 30 else "")
+        ime_show_0 = ime_composing if active_field == 0 else ""
+        cursor_0 = "|" if active_field == 0 and cursor_blink < 30 and not ime_show_0 else ""
+        url_text = server_url + ime_show_0 + cursor_0
         ts1 = btn_font.render(url_text, True, WHITE)
         screen.blit(ts1, (field_rect1.x + 8, field_rect1.y + 8))
+        # Underline IME composing text
+        if ime_show_0:
+            comp_x = field_rect1.x + 8 + btn_font.size(server_url)[0]
+            comp_w = btn_font.size(ime_show_0)[0]
+            comp_y = field_rect1.y + 30
+            pygame.draw.line(screen, YELLOW, (comp_x, comp_y), (comp_x + comp_w, comp_y), 2)
 
         lbl2 = btn_font.render("Player Name:", True, WHITE)
         screen.blit(lbl2, (cx - 180, h // 2 - 30))
@@ -677,9 +1231,17 @@ def connection_screen(screen, font, btn_font):
         color2 = INPUT_ACTIVE if active_field == 1 else INPUT_BG
         pygame.draw.rect(screen, color2, field_rect2, border_radius=4)
         pygame.draw.rect(screen, WHITE, field_rect2, 1, border_radius=4)
-        name_text = player_name + ("|" if active_field == 1 and cursor_blink < 30 else "")
+        ime_show_1 = ime_composing if active_field == 1 else ""
+        cursor_1 = "|" if active_field == 1 and cursor_blink < 30 and not ime_show_1 else ""
+        name_text = player_name + ime_show_1 + cursor_1
         ts2 = btn_font.render(name_text, True, WHITE)
         screen.blit(ts2, (field_rect2.x + 8, field_rect2.y + 8))
+        # Underline IME composing text
+        if ime_show_1:
+            comp_x = field_rect2.x + 8 + btn_font.size(player_name)[0]
+            comp_w = btn_font.size(ime_show_1)[0]
+            comp_y = field_rect2.y + 30
+            pygame.draw.line(screen, YELLOW, (comp_x, comp_y), (comp_x + comp_w, comp_y), 2)
 
         # Time control selection
         tc_label = btn_font.render("\u6301\u3061\u6642\u9593:", True, WHITE)
@@ -717,7 +1279,13 @@ def main():
     font = None
     btn_font = None
     small_font = None
+    # General font paths (for game text, clock, etc.)
     font_paths = [
+        # Windows standard fonts
+        "C:/Windows/Fonts/meiryo.ttc",
+        "C:/Windows/Fonts/YuGothM.ttc",
+        "C:/Windows/Fonts/msgothic.ttc",
+        # Linux fonts
         "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
         "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
         "/usr/share/fonts/truetype/fonts-japanese-gothic.ttf",
@@ -727,16 +1295,47 @@ def main():
         try:
             font = pygame.font.Font(fp, 18)
             btn_font = pygame.font.Font(fp, 14)
-            small_font = pygame.font.Font(fp, 12)
+            small_font = pygame.font.Font(fp, 13)
+            clock_font = pygame.font.Font(fp, 29)
+            clock_name_font = pygame.font.Font(fp, 26)
             break
         except Exception:
             continue
     if font is None:
-        font = pygame.font.SysFont("notosanscjk,notosansjp,notosans,sans", 18)
-        btn_font = pygame.font.SysFont("notosanscjk,notosansjp,notosans,sans", 14)
-        small_font = pygame.font.SysFont("notosanscjk,notosansjp,notosans,sans", 12)
+        font = pygame.font.SysFont("meiryo,yugothic,msgothic,notosanscjk,sans", 18)
+        btn_font = pygame.font.SysFont("meiryo,yugothic,msgothic,notosanscjk,sans", 14)
+        small_font = pygame.font.SysFont("meiryo,yugothic,msgothic,notosanscjk,sans", 13)
+        clock_font = pygame.font.SysFont("meiryo,yugothic,msgothic,notosanscjk,sans", 29)
+        clock_name_font = pygame.font.SysFont("meiryo,yugothic,msgothic,notosanscjk,sans", 26)
 
-    result = connection_screen(screen, font, btn_font)
+    # Menu font: Yu Gothic UI (standard Windows menu font)
+    # pygame.font cannot select face index in TTC files, so use pygame.freetype
+    # which supports font_index to pick the UI variant (face 1 in YuGothR.ttc)
+    menu_font = None
+    _ft_menu_candidates = [
+        ("C:/Windows/Fonts/YuGothR.ttc", 1, 13),   # Yu Gothic UI Regular
+        ("C:/Windows/Fonts/meiryo.ttc", 2, 13),     # Meiryo UI Regular
+        ("C:/Windows/Fonts/msgothic.ttc", 2, 12),   # MS UI Gothic
+    ]
+    for _fp, _fi, _sz in _ft_menu_candidates:
+        try:
+            _ft = pygame.freetype.Font(_fp, size=_sz, font_index=_fi)
+            menu_font = _FreetypeMenuFont(_ft)
+            break
+        except Exception:
+            continue
+    if menu_font is None:
+        menu_font = pygame.font.SysFont("yugothicui,meiryoui,msuigothic,notosanscjk,sans", 13)
+
+    # Auth screen (register / login)
+    server_base_url = "wss://app-aiszfyoe.fly.dev"
+    auth_result = auth_screen(screen, font, btn_font, server_base_url)
+    if auth_result is None:
+        pygame.quit()
+        sys.exit()
+    auth_nickname, auth_name = auth_result
+
+    result = connection_screen(screen, font, btn_font, auth_nickname)
     if result is None:
         pygame.quit()
         sys.exit()
@@ -774,7 +1373,7 @@ def main():
     game_main_time = main_time_cfg
     game_byoyomi = byoyomi_cfg
 
-    menu_bar = MenuBar(btn_font, INIT_W)
+    menu_bar = MenuBar(menu_font, INIT_W)
 
     def make_online_buttons(lay, bf):
         btn_y = lay.win_h - BUTTON_BAR_HEIGHT + 6
@@ -978,19 +1577,28 @@ def main():
                     action = menu_bar.handle_click(pos)
                     if action:
                         mi, ii = action
-                        if mi == 0:  # Game menu
+                        if mi == 0:  # File menu
+                            if ii == 3:  # Exit
+                                running = False
+                        elif mi == 1:  # Edit menu
+                            pass  # Not implemented in online mode
+                        elif mi == 2:  # View menu
+                            pass  # Not implemented yet
+                        elif mi == 3:  # Game menu (対局)
                             if ii == 0 and game_started and current_player == my_color and not game_over:
                                 net.send({"type": "pass"})
                             elif ii == 1 and game_started and not game_over:
                                 net.send({"type": "resign"})
-                            elif ii == 2:
-                                running = False
-                        elif mi == 1:  # Settings - time control
+                        elif mi == 4:  # Joseki
+                            pass  # Not implemented yet
+                        elif mi == 5:  # Board edit
+                            pass  # Not implemented yet
+                        elif mi == 6:  # Tools - time control
                             if ii < len(TIME_PRESETS) and not game_started:
                                 time_preset_idx = ii
                                 _, mt, byo = TIME_PRESETS[ii]
                                 net.time_control = (mt, byo)
-                        elif mi == 2:  # Help
+                        elif mi == 7:  # Help
                             if ii == 0:
                                 version_popup = not version_popup
                     continue
@@ -1060,11 +1668,13 @@ def main():
         if not white_name:
             white_name = "White"
 
-        draw_clock_panel(screen, font, small_font, layout, "left",
+        draw_clock_panel(screen, font, small_font, clock_font, clock_name_font,
+                         layout, "left",
                          black_name, disp_black_main, disp_black_byo,
                          disp_black_byo_rem, current_player == 1 and game_started,
                          my_color == 1)
-        draw_clock_panel(screen, font, small_font, layout, "right",
+        draw_clock_panel(screen, font, small_font, clock_font, clock_name_font,
+                         layout, "right",
                          white_name, disp_white_main, disp_white_byo,
                          disp_white_byo_rem, current_player == 2 and game_started,
                          my_color == 2)
