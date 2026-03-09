@@ -1052,12 +1052,16 @@ def auth_screen(screen, font, btn_font, server_base_url):
         # Tabs
         login_tab_rect = pygame.Rect(cx - 160, 80, 155, 36)
         reg_tab_rect = pygame.Rect(cx + 5, 80, 155, 36)
+        TAB_ACTIVE = (70, 130, 200)
+        TAB_INACTIVE = (90, 90, 90)
         if mode == "login":
-            pygame.draw.rect(screen, (70, 130, 200), login_tab_rect, border_radius=5)
-            pygame.draw.rect(screen, BUTTON_COLOR, reg_tab_rect, border_radius=5)
+            pygame.draw.rect(screen, TAB_ACTIVE, login_tab_rect, border_radius=5)
+            pygame.draw.rect(screen, TAB_INACTIVE, reg_tab_rect, border_radius=5)
+            pygame.draw.rect(screen, (130, 130, 130), reg_tab_rect, 1, border_radius=5)
         else:
-            pygame.draw.rect(screen, BUTTON_COLOR, login_tab_rect, border_radius=5)
-            pygame.draw.rect(screen, (70, 130, 200), reg_tab_rect, border_radius=5)
+            pygame.draw.rect(screen, TAB_INACTIVE, login_tab_rect, border_radius=5)
+            pygame.draw.rect(screen, (130, 130, 130), login_tab_rect, 1, border_radius=5)
+            pygame.draw.rect(screen, TAB_ACTIVE, reg_tab_rect, border_radius=5)
         lt = btn_font.render("\u30ed\u30b0\u30a4\u30f3", True, WHITE)
         rt = btn_font.render("\u65b0\u898f\u767b\u9332", True, WHITE)
         screen.blit(lt, lt.get_rect(center=login_tab_rect.center))
