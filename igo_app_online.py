@@ -849,10 +849,11 @@ def auth_screen(screen, font, btn_font, server_base_url):
 
     # State
     mode = "login"  # "login" or "register"
-    # Register fields: name, nickname, password
+    # Register fields: name, nickname, password, skill_level
     reg_name = ""
     reg_nickname = ""
     reg_password = ""
+    reg_skill_level = ""
     # Login fields: nickname, password
     login_nickname = ""
     login_password = ""
@@ -872,22 +873,23 @@ def auth_screen(screen, font, btn_font, server_base_url):
 
     def get_fields():
         if mode == "register":
-            return [reg_name, reg_nickname, reg_password]
+            return [reg_name, reg_nickname, reg_password, reg_skill_level]
         else:
             return [login_nickname, login_password]
 
     def set_field(idx, val):
-        nonlocal reg_name, reg_nickname, reg_password, login_nickname, login_password
+        nonlocal reg_name, reg_nickname, reg_password, reg_skill_level, login_nickname, login_password
         if mode == "register":
             if idx == 0: reg_name = val
             elif idx == 1: reg_nickname = val
             elif idx == 2: reg_password = val
+            elif idx == 3: reg_skill_level = val
         else:
             if idx == 0: login_nickname = val
             elif idx == 1: login_password = val
 
     def field_count():
-        return 3 if mode == "register" else 2
+        return 4 if mode == "register" else 2
 
     def commit_ime():
         """Commit any pending IME composition text to the current field."""
@@ -933,12 +935,13 @@ def auth_screen(screen, font, btn_font, server_base_url):
         nonlocal login_nickname, login_password
         commit_ime()
         if not reg_name.strip() or not reg_nickname.strip() or not reg_password:
-            message = "\u3059\u3079\u3066\u306e\u9805\u76ee\u3092\u5165\u529b\u3057\u3066\u304f\u3060\u3055\u3044"
+            message = "\u6c0f\u540d\u30fb\u30cb\u30c3\u30af\u30cd\u30fc\u30e0\u30fb\u30d1\u30b9\u30ef\u30fc\u30c9\u3092\u5165\u529b\u3057\u3066\u304f\u3060\u3055\u3044"
             message_color = RED
             message_timer = 120
             return
         result = _http_post_json(f"{http_url}/register", {
             "name": reg_name, "nickname": reg_nickname, "password": reg_password,
+            "skill_level": reg_skill_level,
         })
         if result.get("ok"):
             # Carry credentials to login screen
@@ -1033,7 +1036,7 @@ def auth_screen(screen, font, btn_font, server_base_url):
                 # --- Register mode click targets ---
                 else:
                     # Register button
-                    reg_btn_y = base_y + 3 * 70 + 10
+                    reg_btn_y = base_y + 4 * 70 + 10
                     reg_btn_rect = pygame.Rect(cx - 80, reg_btn_y, 160, 40)
                     if reg_btn_rect.collidepoint(mx, my):
                         do_register()
@@ -1129,8 +1132,8 @@ def auth_screen(screen, font, btn_font, server_base_url):
             screen.blit(subtitle, subtitle.get_rect(center=(cx, 75)))
 
             base_y = 100
-            labels = ["\u6c0f\u540d:", "\u30cb\u30c3\u30af\u30cd\u30fc\u30e0:", "\u30d1\u30b9\u30ef\u30fc\u30c9:"]
-            fields = [reg_name, reg_nickname, reg_password]
+            labels = ["\u6c0f\u540d:", "\u30cb\u30c3\u30af\u30cd\u30fc\u30e0:", "\u30d1\u30b9\u30ef\u30fc\u30c9:", "\u68cb\u529b:"]
+            fields = [reg_name, reg_nickname, reg_password, reg_skill_level]
             for fi, (label, val) in enumerate(zip(labels, fields)):
                 lbl = btn_font.render(label, True, WHITE)
                 screen.blit(lbl, (cx - 160, base_y + fi * 70))
@@ -1145,8 +1148,14 @@ def auth_screen(screen, font, btn_font, server_base_url):
                                      active_field == fi, cursor_blink,
                                      ime_composing if active_field == fi else "")
 
+            # Hint for skill level
+            hint_text = "\u4f8b: \u521d\u6bb5\u30015\u7d1a\u306a\u3069\uff08\u4efb\u610f\uff09"
+            hint_surf = btn_font.render(hint_text, True, (120, 120, 120))
+            hint_field_rect = pygame.Rect(cx - 160, base_y + 3 * 70 + 22, 320, 35)
+            screen.blit(hint_surf, (hint_field_rect.right + 8, hint_field_rect.y + 8))
+
             # Register button
-            reg_btn_y = base_y + 3 * 70 + 10
+            reg_btn_y = base_y + 4 * 70 + 10
             reg_btn_rect = pygame.Rect(cx - 80, reg_btn_y, 160, 40)
             btn_color = GREEN if reg_btn_rect.collidepoint(mx_h, my_h) else (60, 160, 60)
             pygame.draw.rect(screen, btn_color, reg_btn_rect, border_radius=6)
