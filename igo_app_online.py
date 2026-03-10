@@ -831,7 +831,7 @@ def _draw_password_field(screen, font, rect, text, active, cursor_blink, ime_tex
 
 
 def auth_screen(screen, font, btn_font, server_base_url):
-    """Registration / Login screen. Returns (nickname, name) or None if quit."""
+    """Login / Registration screen. Returns (nickname, name) or None if quit."""
     clock = pygame.time.Clock()
     http_url = server_base_url.replace("wss://", "https://").replace("ws://", "http://")
 
@@ -864,6 +864,9 @@ def auth_screen(screen, font, btn_font, server_base_url):
     message = ""  # status/error message
     message_color = RED
     message_timer = 0
+
+    LINK_COLOR = (100, 180, 255)
+    LINK_HOVER_COLOR = (140, 210, 255)
 
     pygame.key.start_text_input()
 
@@ -901,9 +904,60 @@ def auth_screen(screen, font, btn_font, server_base_url):
         commit_ime()
         active_field = new_idx
 
+    def do_login():
+        """Attempt login and return result tuple or None."""
+        nonlocal message, message_color, message_timer
+        commit_ime()
+        if not login_nickname.strip() or not login_password:
+            message = "\u30cb\u30c3\u30af\u30cd\u30fc\u30e0\u3068\u30d1\u30b9\u30ef\u30fc\u30c9\u3092\u5165\u529b\u3057\u3066\u304f\u3060\u3055\u3044"
+            message_color = RED
+            message_timer = 120
+            return None
+        result = _http_post_json(f"{http_url}/login", {
+            "nickname": login_nickname, "password": login_password,
+        })
+        if result.get("ok"):
+            if save_creds:
+                _save_credentials(login_nickname, login_password, result.get("name", ""))
+            pygame.key.stop_text_input()
+            return (result["nickname"], result.get("name", ""))
+        else:
+            message = result.get("error", "\u30ed\u30b0\u30a4\u30f3\u5931\u6557")
+            message_color = RED
+            message_timer = 120
+            return None
+
+    def do_register():
+        """Attempt registration and switch to login on success."""
+        nonlocal mode, active_field, ime_composing, message, message_color, message_timer
+        nonlocal login_nickname, login_password
+        commit_ime()
+        if not reg_name.strip() or not reg_nickname.strip() or not reg_password:
+            message = "\u3059\u3079\u3066\u306e\u9805\u76ee\u3092\u5165\u529b\u3057\u3066\u304f\u3060\u3055\u3044"
+            message_color = RED
+            message_timer = 120
+            return
+        result = _http_post_json(f"{http_url}/register", {
+            "name": reg_name, "nickname": reg_nickname, "password": reg_password,
+        })
+        if result.get("ok"):
+            # Carry credentials to login screen
+            login_nickname = reg_nickname
+            login_password = reg_password
+            mode = "login"
+            active_field = 0
+            ime_composing = ""
+            message = "\u767b\u9332\u6210\u529f\uff01\u30ed\u30b0\u30a4\u30f3\u3057\u3066\u304f\u3060\u3055\u3044"
+            message_color = GREEN
+            message_timer = 180
+        else:
+            message = result.get("error", "\u767b\u9332\u5931\u6557")
+            message_color = RED
+            message_timer = 120
+
     while True:
-        was_composing = bool(ime_composing)  # remember if IME was active before this frame
-        ime_confirmed = False  # flag: IME composition was just confirmed this frame
+        was_composing = bool(ime_composing)
+        ime_confirmed = False
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 pygame.key.stop_text_input()
@@ -917,7 +971,7 @@ def auth_screen(screen, font, btn_font, server_base_url):
                 if active_field < len(fields):
                     set_field(active_field, fields[active_field] + event.text)
                 if ime_composing or was_composing:
-                    ime_confirmed = True  # Enter was used to confirm IME, don't submit
+                    ime_confirmed = True
                 ime_composing = ""
             elif event.type == pygame.TEXTEDITING:
                 ime_composing = event.text
@@ -926,41 +980,15 @@ def auth_screen(screen, font, btn_font, server_base_url):
                     switch_field((active_field + 1) % field_count())
                 elif event.key == pygame.K_RETURN:
                     if ime_composing or ime_confirmed or was_composing:
-                        # IME was active — just confirm composition, don't submit
                         commit_ime()
                     else:
-                        # No IME — submit the form
-                        commit_ime()  # flush any residual
-                        if mode == "register":
-                            result = _http_post_json(f"{http_url}/register", {
-                                "name": reg_name, "nickname": reg_nickname, "password": reg_password,
-                            })
-                            if result.get("ok"):
-                                # Registration success -> switch to login with credentials carried over
-                                login_nickname = reg_nickname
-                                login_password = reg_password
-                                mode = "login"
-                                active_field = 0
-                                message = "\u767b\u9332\u6210\u529f\uff01\u30ed\u30b0\u30a4\u30f3\u3057\u3066\u304f\u3060\u3055\u3044"  # 登録成功！ログインしてください
-                                message_color = GREEN
-                                message_timer = 180
-                            else:
-                                message = result.get("error", "\u767b\u9332\u5931\u6557")
-                                message_color = RED
-                                message_timer = 120
+                        commit_ime()
+                        if mode == "login":
+                            login_result = do_login()
+                            if login_result is not None:
+                                return login_result
                         else:
-                            result = _http_post_json(f"{http_url}/login", {
-                                "nickname": login_nickname, "password": login_password,
-                            })
-                            if result.get("ok"):
-                                if save_creds:
-                                    _save_credentials(login_nickname, login_password, result.get("name", ""))
-                                pygame.key.stop_text_input()
-                                return (result["nickname"], result.get("name", ""))
-                            else:
-                                message = result.get("error", "\u30ed\u30b0\u30a4\u30f3\u5931\u6557")
-                                message_color = RED
-                                message_timer = 120
+                            do_register()
                 elif event.key == pygame.K_BACKSPACE:
                     if not ime_composing:
                         fields = get_fields()
@@ -970,163 +998,179 @@ def auth_screen(screen, font, btn_font, server_base_url):
                 mx, my = event.pos
                 w, h = screen.get_size()
                 cx = w // 2
-                # Tab buttons
-                login_tab_rect = pygame.Rect(cx - 160, 80, 155, 36)
-                reg_tab_rect = pygame.Rect(cx + 5, 80, 155, 36)
-                if login_tab_rect.collidepoint(mx, my):
-                    commit_ime()
-                    mode = "login"
-                    active_field = 0
-                    ime_composing = ""
-                    message = ""
-                elif reg_tab_rect.collidepoint(mx, my):
-                    commit_ime()
-                    mode = "register"
-                    active_field = 0
-                    ime_composing = ""
-                    message = ""
                 # Field clicks
-                base_y = 140
+                base_y = 130 if mode == "login" else 100
                 for fi in range(field_count()):
                     field_rect = pygame.Rect(cx - 160, base_y + fi * 70 + 22, 320, 35)
                     if field_rect.collidepoint(mx, my):
                         if fi != active_field:
                             switch_field(fi)
-                # Save checkbox
-                cb_y = base_y + field_count() * 70 + 5
-                cb_rect = pygame.Rect(cx - 160, cb_y, 20, 20)
-                if cb_rect.collidepoint(mx, my):
-                    save_creds = not save_creds
-                # Submit button
-                submit_y = cb_y + 40
-                submit_rect = pygame.Rect(cx - 80, submit_y, 160, 40)
-                if submit_rect.collidepoint(mx, my):
-                    commit_ime()  # flush any pending IME text before submit
-                    if mode == "register":
-                        result = _http_post_json(f"{http_url}/register", {
-                            "name": reg_name, "nickname": reg_nickname, "password": reg_password,
-                        })
-                        if result.get("ok"):
-                            # Registration success -> switch to login with credentials carried over
-                            login_nickname = reg_nickname
-                            login_password = reg_password
-                            mode = "login"
-                            active_field = 0
-                            message = "\u767b\u9332\u6210\u529f\uff01\u30ed\u30b0\u30a4\u30f3\u3057\u3066\u304f\u3060\u3055\u3044"  # 登録成功！ログインしてください
-                            message_color = GREEN
-                            message_timer = 180
-                        else:
-                            message = result.get("error", "\u767b\u9332\u5931\u6557")
-                            message_color = RED
-                            message_timer = 120
-                    else:
-                        result = _http_post_json(f"{http_url}/login", {
-                            "nickname": login_nickname, "password": login_password,
-                        })
-                        if result.get("ok"):
-                            if save_creds:
-                                _save_credentials(login_nickname, login_password, result.get("name", ""))
-                            pygame.key.stop_text_input()
-                            return (result["nickname"], result.get("name", ""))
-                        else:
-                            message = result.get("error", "\u30ed\u30b0\u30a4\u30f3\u5931\u6557")
-                            message_color = RED
-                            message_timer = 120
-                # Skip button (guest)
-                skip_y = submit_y + 50
-                skip_rect = pygame.Rect(cx - 80, skip_y, 160, 32)
-                if skip_rect.collidepoint(mx, my):
-                    pygame.key.stop_text_input()
-                    return ("Guest", "Guest")
+                # --- Login mode click targets ---
+                if mode == "login":
+                    # Save checkbox
+                    cb_y = base_y + 2 * 70 + 5
+                    cb_rect = pygame.Rect(cx - 160, cb_y, 20, 20)
+                    if cb_rect.collidepoint(mx, my):
+                        save_creds = not save_creds
+                    # Login button
+                    login_btn_y = cb_y + 40
+                    login_btn_rect = pygame.Rect(cx - 80, login_btn_y, 160, 40)
+                    if login_btn_rect.collidepoint(mx, my):
+                        login_result = do_login()
+                        if login_result is not None:
+                            return login_result
+                    # Registration link
+                    link_text_str = "\u30a2\u30ab\u30a6\u30f3\u30c8\u3092\u304a\u6301\u3061\u3067\u306a\u3044\u65b9\u306f\u3053\u3061\u3089\u304b\u3089\u767b\u9332\u3057\u3066\u304f\u3060\u3055\u3044\u3002"
+                    link_w, link_h = btn_font.size(link_text_str)
+                    link_y = login_btn_y + 60
+                    link_rect = pygame.Rect(cx - link_w // 2, link_y, link_w, link_h)
+                    if link_rect.collidepoint(mx, my):
+                        commit_ime()
+                        mode = "register"
+                        active_field = 0
+                        ime_composing = ""
+                        message = ""
+                # --- Register mode click targets ---
+                else:
+                    # Register button
+                    reg_btn_y = base_y + 3 * 70 + 10
+                    reg_btn_rect = pygame.Rect(cx - 80, reg_btn_y, 160, 40)
+                    if reg_btn_rect.collidepoint(mx, my):
+                        do_register()
+                    # Back to login link
+                    back_text_str = "\u30ed\u30b0\u30a4\u30f3\u753b\u9762\u306b\u623b\u308b"
+                    back_w, back_h = btn_font.size(back_text_str)
+                    back_y = reg_btn_y + 55
+                    back_rect = pygame.Rect(cx - back_w // 2, back_y, back_w, back_h)
+                    if back_rect.collidepoint(mx, my):
+                        commit_ime()
+                        mode = "login"
+                        active_field = 0
+                        ime_composing = ""
+                        message = ""
 
         # --- Draw ---
         w, h = screen.get_size()
         cx = w // 2
         screen.fill(BG_DARK)
         cursor_blink = (cursor_blink + 1) % 60
+        mx_h, my_h = pygame.mouse.get_pos()
 
         # Title
         title = font.render("\u56f2\u7881\u30aa\u30f3\u30e9\u30a4\u30f3", True, WHITE)
         screen.blit(title, title.get_rect(center=(cx, 40)))
 
-        # Tabs
-        login_tab_rect = pygame.Rect(cx - 160, 80, 155, 36)
-        reg_tab_rect = pygame.Rect(cx + 5, 80, 155, 36)
-        TAB_ACTIVE = (70, 130, 200)
-        TAB_INACTIVE = (90, 90, 90)
         if mode == "login":
-            pygame.draw.rect(screen, TAB_ACTIVE, login_tab_rect, border_radius=5)
-            pygame.draw.rect(screen, TAB_INACTIVE, reg_tab_rect, border_radius=5)
-            pygame.draw.rect(screen, (130, 130, 130), reg_tab_rect, 1, border_radius=5)
-        else:
-            pygame.draw.rect(screen, TAB_INACTIVE, login_tab_rect, border_radius=5)
-            pygame.draw.rect(screen, (130, 130, 130), login_tab_rect, 1, border_radius=5)
-            pygame.draw.rect(screen, TAB_ACTIVE, reg_tab_rect, border_radius=5)
-        lt = btn_font.render("\u30ed\u30b0\u30a4\u30f3", True, WHITE)
-        rt = btn_font.render("\u65b0\u898f\u767b\u9332", True, WHITE)
-        screen.blit(lt, lt.get_rect(center=login_tab_rect.center))
-        screen.blit(rt, rt.get_rect(center=reg_tab_rect.center))
+            # --- LOGIN SCREEN ---
+            subtitle = btn_font.render("\u30ed\u30b0\u30a4\u30f3", True, (200, 200, 200))
+            screen.blit(subtitle, subtitle.get_rect(center=(cx, 75)))
 
-        # Fields
-        base_y = 140
-        if mode == "register":
-            labels = ["\u540d\u524d:", "\u30cb\u30c3\u30af\u30cd\u30fc\u30e0:", "\u30d1\u30b9\u30ef\u30fc\u30c9:"]
-            fields = [reg_name, reg_nickname, reg_password]
-        else:
+            base_y = 130
             labels = ["\u30cb\u30c3\u30af\u30cd\u30fc\u30e0:", "\u30d1\u30b9\u30ef\u30fc\u30c9:"]
             fields = [login_nickname, login_password]
-
-        for fi, (label, val) in enumerate(zip(labels, fields)):
-            lbl = btn_font.render(label, True, WHITE)
-            screen.blit(lbl, (cx - 160, base_y + fi * 70))
-            field_rect = pygame.Rect(cx - 160, base_y + fi * 70 + 22, 320, 35)
-            is_password = (label == "\u30d1\u30b9\u30ef\u30fc\u30c9:")
-            if is_password:
-                _draw_password_field(screen, btn_font, field_rect, val,
+            for fi, (label, val) in enumerate(zip(labels, fields)):
+                lbl = btn_font.render(label, True, WHITE)
+                screen.blit(lbl, (cx - 160, base_y + fi * 70))
+                field_rect = pygame.Rect(cx - 160, base_y + fi * 70 + 22, 320, 35)
+                is_pw = (fi == 1)
+                if is_pw:
+                    _draw_password_field(screen, btn_font, field_rect, val,
+                                         active_field == fi, cursor_blink,
+                                         ime_composing if active_field == fi else "")
+                else:
+                    _draw_text_field(screen, btn_font, field_rect, val,
                                      active_field == fi, cursor_blink,
                                      ime_composing if active_field == fi else "")
-            else:
-                _draw_text_field(screen, btn_font, field_rect, val,
-                                 active_field == fi, cursor_blink,
-                                 ime_composing if active_field == fi else "")
 
-        # Save checkbox
-        cb_y = base_y + field_count() * 70 + 5
-        cb_rect = pygame.Rect(cx - 160, cb_y, 20, 20)
-        pygame.draw.rect(screen, INPUT_BG, cb_rect, border_radius=3)
-        pygame.draw.rect(screen, WHITE, cb_rect, 1, border_radius=3)
-        if save_creds:
-            # Draw checkmark
-            pygame.draw.line(screen, GREEN, (cb_rect.x + 4, cb_rect.y + 10),
-                             (cb_rect.x + 8, cb_rect.y + 16), 2)
-            pygame.draw.line(screen, GREEN, (cb_rect.x + 8, cb_rect.y + 16),
-                             (cb_rect.x + 16, cb_rect.y + 4), 2)
-        cb_label = btn_font.render("\u30ed\u30b0\u30a4\u30f3\u60c5\u5831\u3092\u4fdd\u5b58\uff08\u6b21\u56de\u304b\u3089\u30b9\u30ad\u30c3\u30d7\uff09", True, (200, 200, 200))
-        screen.blit(cb_label, (cb_rect.right + 8, cb_y + 2))
+            # Save checkbox
+            cb_y = base_y + 2 * 70 + 5
+            cb_rect = pygame.Rect(cx - 160, cb_y, 20, 20)
+            pygame.draw.rect(screen, INPUT_BG, cb_rect, border_radius=3)
+            pygame.draw.rect(screen, WHITE, cb_rect, 1, border_radius=3)
+            if save_creds:
+                pygame.draw.line(screen, GREEN, (cb_rect.x + 4, cb_rect.y + 10),
+                                 (cb_rect.x + 8, cb_rect.y + 16), 2)
+                pygame.draw.line(screen, GREEN, (cb_rect.x + 8, cb_rect.y + 16),
+                                 (cb_rect.x + 16, cb_rect.y + 4), 2)
+            cb_label = btn_font.render("\u30ed\u30b0\u30a4\u30f3\u60c5\u5831\u3092\u4fdd\u5b58", True, (200, 200, 200))
+            screen.blit(cb_label, (cb_rect.right + 8, cb_y + 2))
 
-        # Submit button
-        submit_y = cb_y + 40
-        submit_rect = pygame.Rect(cx - 80, submit_y, 160, 40)
-        mx_h, my_h = pygame.mouse.get_pos()
-        btn_color = GREEN if submit_rect.collidepoint(mx_h, my_h) else (60, 160, 60)
-        pygame.draw.rect(screen, btn_color, submit_rect, border_radius=6)
-        submit_label = "\u767b\u9332" if mode == "register" else "\u30ed\u30b0\u30a4\u30f3"
-        submit_text = font.render(submit_label, True, WHITE)
-        screen.blit(submit_text, submit_text.get_rect(center=submit_rect.center))
+            # Login button
+            login_btn_y = cb_y + 40
+            login_btn_rect = pygame.Rect(cx - 80, login_btn_y, 160, 40)
+            btn_color = GREEN if login_btn_rect.collidepoint(mx_h, my_h) else (60, 160, 60)
+            pygame.draw.rect(screen, btn_color, login_btn_rect, border_radius=6)
+            login_btn_text = font.render("\u30ed\u30b0\u30a4\u30f3", True, WHITE)
+            screen.blit(login_btn_text, login_btn_text.get_rect(center=login_btn_rect.center))
 
-        # Skip (guest) button
-        skip_y = submit_y + 50
-        skip_rect = pygame.Rect(cx - 80, skip_y, 160, 32)
-        skip_color = (80, 80, 80) if not skip_rect.collidepoint(mx_h, my_h) else (110, 110, 110)
-        pygame.draw.rect(screen, skip_color, skip_rect, border_radius=5)
-        skip_text = btn_font.render("\u30b2\u30b9\u30c8\u3067\u30d7\u30ec\u30a4", True, (180, 180, 180))
-        screen.blit(skip_text, skip_text.get_rect(center=skip_rect.center))
+            # Registration link
+            link_y = login_btn_y + 60
+            link_text_str = "\u30a2\u30ab\u30a6\u30f3\u30c8\u3092\u304a\u6301\u3061\u3067\u306a\u3044\u65b9\u306f\u3053\u3061\u3089\u304b\u3089\u767b\u9332\u3057\u3066\u304f\u3060\u3055\u3044\u3002"
+            link_w, link_h = btn_font.size(link_text_str)
+            link_rect = pygame.Rect(cx - link_w // 2, link_y, link_w, link_h)
+            is_hover = link_rect.collidepoint(mx_h, my_h)
+            lc = LINK_HOVER_COLOR if is_hover else LINK_COLOR
+            link_surf = btn_font.render(link_text_str, True, lc)
+            screen.blit(link_surf, link_rect.topleft)
+            # Underline
+            pygame.draw.line(screen, lc,
+                             (link_rect.x, link_rect.bottom),
+                             (link_rect.right, link_rect.bottom), 1)
 
-        # Message
-        if message and message_timer > 0:
-            msg_surf = btn_font.render(message, True, message_color)
-            screen.blit(msg_surf, msg_surf.get_rect(center=(cx, skip_y + 50)))
-            message_timer -= 1
+            # Message
+            if message and message_timer > 0:
+                msg_surf = btn_font.render(message, True, message_color)
+                screen.blit(msg_surf, msg_surf.get_rect(center=(cx, link_y + 40)))
+                message_timer -= 1
+
+        else:
+            # --- REGISTER SCREEN ---
+            subtitle = btn_font.render("\u65b0\u898f\u767b\u9332", True, (200, 200, 200))
+            screen.blit(subtitle, subtitle.get_rect(center=(cx, 75)))
+
+            base_y = 100
+            labels = ["\u6c0f\u540d:", "\u30cb\u30c3\u30af\u30cd\u30fc\u30e0:", "\u30d1\u30b9\u30ef\u30fc\u30c9:"]
+            fields = [reg_name, reg_nickname, reg_password]
+            for fi, (label, val) in enumerate(zip(labels, fields)):
+                lbl = btn_font.render(label, True, WHITE)
+                screen.blit(lbl, (cx - 160, base_y + fi * 70))
+                field_rect = pygame.Rect(cx - 160, base_y + fi * 70 + 22, 320, 35)
+                is_pw = (fi == 2)
+                if is_pw:
+                    _draw_password_field(screen, btn_font, field_rect, val,
+                                         active_field == fi, cursor_blink,
+                                         ime_composing if active_field == fi else "")
+                else:
+                    _draw_text_field(screen, btn_font, field_rect, val,
+                                     active_field == fi, cursor_blink,
+                                     ime_composing if active_field == fi else "")
+
+            # Register button
+            reg_btn_y = base_y + 3 * 70 + 10
+            reg_btn_rect = pygame.Rect(cx - 80, reg_btn_y, 160, 40)
+            btn_color = GREEN if reg_btn_rect.collidepoint(mx_h, my_h) else (60, 160, 60)
+            pygame.draw.rect(screen, btn_color, reg_btn_rect, border_radius=6)
+            reg_btn_text = font.render("\u767b\u9332", True, WHITE)
+            screen.blit(reg_btn_text, reg_btn_text.get_rect(center=reg_btn_rect.center))
+
+            # Back to login link
+            back_y = reg_btn_y + 55
+            back_text_str = "\u30ed\u30b0\u30a4\u30f3\u753b\u9762\u306b\u623b\u308b"
+            back_w, back_h = btn_font.size(back_text_str)
+            back_rect = pygame.Rect(cx - back_w // 2, back_y, back_w, back_h)
+            is_hover = back_rect.collidepoint(mx_h, my_h)
+            bc = LINK_HOVER_COLOR if is_hover else LINK_COLOR
+            back_surf = btn_font.render(back_text_str, True, bc)
+            screen.blit(back_surf, back_rect.topleft)
+            pygame.draw.line(screen, bc,
+                             (back_rect.x, back_rect.bottom),
+                             (back_rect.right, back_rect.bottom), 1)
+
+            # Message
+            if message and message_timer > 0:
+                msg_surf = btn_font.render(message, True, message_color)
+                screen.blit(msg_surf, msg_surf.get_rect(center=(cx, back_y + 40)))
+                message_timer -= 1
 
         pygame.display.flip()
         clock.tick(30)
