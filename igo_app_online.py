@@ -782,13 +782,13 @@ def _clear_credentials():
         pass
 
 
-def _http_post_json(url, data):
+def _http_post_json(url, data, timeout=60):
     """Send a POST request with JSON body and return parsed response."""
     body = json.dumps(data, ensure_ascii=False).encode("utf-8")
     req = urllib.request.Request(url, data=body, method="POST")
     req.add_header("Content-Type", "application/json")
     try:
-        with urllib.request.urlopen(req, timeout=10) as resp:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
             return json.loads(resp.read().decode("utf-8"))
     except urllib.error.HTTPError as e:
         try:
@@ -838,6 +838,13 @@ def auth_screen(screen, font, btn_font, server_base_url):
     # Try auto-login with saved credentials
     saved = _load_credentials()
     if saved:
+        # Show "connecting" message while waiting for server (Render.com cold start can take 50+ sec)
+        screen.fill(BG_DARK)
+        msg = font.render("\u30b5\u30fc\u30d0\u30fc\u306b\u63a5\u7d9a\u4e2d...", True, WHITE)
+        screen.blit(msg, msg.get_rect(center=(screen.get_width() // 2, screen.get_height() // 2)))
+        pygame.display.flip()
+        # Process events to keep window responsive
+        pygame.event.pump()
         result = _http_post_json(f"{http_url}/login", {
             "nickname": saved["nickname"],
             "password": saved["password"],
@@ -1773,4 +1780,18 @@ def main():
     sys.exit()
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        # Show error in a message box so the user can see it
+        try:
+            import tkinter as tk
+            from tkinter import messagebox
+            root = tk.Tk()
+            root.withdraw()
+            messagebox.showerror("\u30a8\u30e9\u30fc", f"\u4e88\u671f\u3057\u306a\u3044\u30a8\u30e9\u30fc\u304c\u767a\u751f\u3057\u307e\u3057\u305f:\n{e}")
+            root.destroy()
+        except Exception:
+            input(f"\u30a8\u30e9\u30fc: {e}\nEnter\u30ad\u30fc\u3092\u62bc\u3057\u3066\u7d42\u4e86...")
