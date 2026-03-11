@@ -23,7 +23,7 @@ def fetch_users(server_url):
     url = f"{server_url}/admin/users"
     try:
         req = urllib.request.Request(url)
-        with urllib.request.urlopen(req, timeout=10) as resp:
+        with urllib.request.urlopen(req, timeout=60) as resp:
             data = json.loads(resp.read().decode("utf-8"))
             if data.get("ok"):
                 return data["users"]
