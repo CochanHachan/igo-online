@@ -15,7 +15,7 @@ import json
 import tkinter as tk
 from tkinter import ttk, messagebox
 
-DEFAULT_SERVER = "https://app-aiszfyoe.fly.dev"
+DEFAULT_SERVER = "https://igo-online.onrender.com"
 
 
 def fetch_users(server_url):

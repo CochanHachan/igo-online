@@ -1189,7 +1189,7 @@ def auth_screen(screen, font, btn_font, server_base_url):
 
 def connection_screen(screen, font, btn_font, nickname="Player"):
     clock = pygame.time.Clock()
-    server_url = "wss://app-aiszfyoe.fly.dev"
+    server_url = "wss://igo-online.onrender.com"
     player_name = nickname
     active_field = 0
     cursor_blink = 0
@@ -1385,7 +1385,7 @@ def main():
         menu_font = pygame.font.SysFont("yugothicui,meiryoui,msuigothic,notosanscjk,sans", 13)
 
     # Auth screen (register / login)
-    server_base_url = "wss://app-aiszfyoe.fly.dev"
+    server_base_url = "wss://igo-online.onrender.com"
     auth_result = auth_screen(screen, font, btn_font, server_base_url)
     if auth_result is None:
         pygame.quit()
