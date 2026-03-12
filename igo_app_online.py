@@ -1097,10 +1097,34 @@ def auth_screen(screen, font, btn_font, server_base_url):
                         message = ""
                 # --- Register mode click targets ---
                 else:
+                    # Skill dropdown click
+                    dd_rect = pygame.Rect(cx - 160, base_y + 3 * 70 + 22, 320, 35)
+                    if skill_dropdown_open:
+                        # Check if clicked on a dropdown item
+                        item_clicked = False
+                        visible_count = min(len(skill_levels) - skill_dropdown_scroll, 8)
+                        for di in range(visible_count):
+                            item_rect = pygame.Rect(dd_rect.x + 2, dd_rect.bottom + 2 + di * 28, dd_rect.width - 4, 28)
+                            if item_rect.collidepoint(mx, my):
+                                actual_idx = skill_dropdown_scroll + di
+                                reg_skill_level = skill_levels[actual_idx]
+                                skill_dropdown_open = False
+                                item_clicked = True
+                                break
+                        if not item_clicked:
+                            # Toggle dropdown if clicked on the field itself, or close if clicked elsewhere
+                            if dd_rect.collidepoint(mx, my):
+                                skill_dropdown_open = False
+                            else:
+                                skill_dropdown_open = False
+                    else:
+                        if dd_rect.collidepoint(mx, my):
+                            skill_dropdown_open = True
                     # Register button
                     reg_btn_y = base_y + 4 * 70 + 10
                     reg_btn_rect = pygame.Rect(cx - 80, reg_btn_y, 160, 40)
                     if reg_btn_rect.collidepoint(mx, my):
+                        skill_dropdown_open = False
                         do_register()
                     # Back to login link
                     back_text_str = "\u30ed\u30b0\u30a4\u30f3\u753b\u9762\u306b\u623b\u308b"
@@ -1109,6 +1133,7 @@ def auth_screen(screen, font, btn_font, server_base_url):
                     back_rect = pygame.Rect(cx - back_w // 2, back_y, back_w, back_h)
                     if back_rect.collidepoint(mx, my):
                         commit_ime()
+                        skill_dropdown_open = False
                         mode = "login"
                         active_field = 0
                         ime_composing = ""
@@ -1194,9 +1219,10 @@ def auth_screen(screen, font, btn_font, server_base_url):
             screen.blit(subtitle, subtitle.get_rect(center=(cx, 75)))
 
             base_y = 100
-            labels = ["\u6c0f\u540d:", "\u30cb\u30c3\u30af\u30cd\u30fc\u30e0:", "\u30d1\u30b9\u30ef\u30fc\u30c9:", "\u68cb\u529b:"]
-            fields = [reg_name, reg_nickname, reg_password, reg_skill_level]
-            for fi, (label, val) in enumerate(zip(labels, fields)):
+            # Draw 3 text fields: name, nickname, password
+            labels = ["\u6c0f\u540d:", "\u30cb\u30c3\u30af\u30cd\u30fc\u30e0:", "\u30d1\u30b9\u30ef\u30fc\u30c9:"]
+            fields_vals = [reg_name, reg_nickname, reg_password]
+            for fi, (label, val) in enumerate(zip(labels, fields_vals)):
                 lbl = btn_font.render(label, True, WHITE)
                 screen.blit(lbl, (cx - 160, base_y + fi * 70))
                 field_rect = pygame.Rect(cx - 160, base_y + fi * 70 + 22, 320, 35)
@@ -1210,11 +1236,23 @@ def auth_screen(screen, font, btn_font, server_base_url):
                                      active_field == fi, cursor_blink,
                                      ime_composing if active_field == fi else "")
 
-            # Hint for skill level
-            hint_text = "\u4f8b: \u521d\u6bb5\u30015\u7d1a\u306a\u3069\uff08\u4efb\u610f\uff09"
-            hint_surf = btn_font.render(hint_text, True, (120, 120, 120))
-            hint_field_rect = pygame.Rect(cx - 160, base_y + 3 * 70 + 22, 320, 35)
-            screen.blit(hint_surf, (hint_field_rect.right + 8, hint_field_rect.y + 8))
+            # Draw skill level dropdown (4th field)
+            skill_label = btn_font.render("\u68cb\u529b:", True, WHITE)
+            screen.blit(skill_label, (cx - 160, base_y + 3 * 70))
+            dd_rect = pygame.Rect(cx - 160, base_y + 3 * 70 + 22, 320, 35)
+            # Calculate hover index for dropdown items
+            dd_hover = -1
+            if skill_dropdown_open:
+                visible_count = min(len(skill_levels) - skill_dropdown_scroll, 8)
+                for di in range(visible_count):
+                    item_rect = pygame.Rect(dd_rect.x + 2, dd_rect.bottom + 2 + di * 28, dd_rect.width - 4, 28)
+                    if item_rect.collidepoint(mx_h, my_h):
+                        dd_hover = di
+                        break
+            # Get visible items based on scroll
+            visible_items = skill_levels[skill_dropdown_scroll:skill_dropdown_scroll + 8]
+            _draw_dropdown_field(screen, btn_font, dd_rect, reg_skill_level,
+                                 False, visible_items, skill_dropdown_open, dd_hover)
 
             # Register button
             reg_btn_y = base_y + 4 * 70 + 10
