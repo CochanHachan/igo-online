@@ -77,7 +77,7 @@ class AdminApp:
         table_frame = tk.Frame(self.root, padx=10, pady=5)
         table_frame.pack(fill=tk.BOTH, expand=True)
 
-        columns = ("id", "name", "nickname", "skill_level", "created_at")
+        columns = ("id", "name", "nickname", "skill_level", "rating", "created_at")
         self.tree = ttk.Treeview(table_frame, columns=columns, show="headings",
                                  selectmode="browse")
 
@@ -85,12 +85,14 @@ class AdminApp:
         self.tree.heading("name", text="氏名")
         self.tree.heading("nickname", text="ニックネーム")
         self.tree.heading("skill_level", text="棋力")
+        self.tree.heading("rating", text="レーティング")
         self.tree.heading("created_at", text="登録日時")
 
         self.tree.column("id", width=50, anchor=tk.CENTER)
         self.tree.column("name", width=150)
         self.tree.column("nickname", width=150)
         self.tree.column("skill_level", width=100)
+        self.tree.column("rating", width=100, anchor=tk.CENTER)
         self.tree.column("created_at", width=180)
 
         # Scrollbar
@@ -124,6 +126,7 @@ class AdminApp:
                     u["name"],
                     u["nickname"],
                     u.get("skill_level", ""),
+                    u.get("rating", 1500),
                     u.get("created_at", ""),
                 ))
             self.count_label.config(text=f"登録ユーザー数: {len(users)}")
