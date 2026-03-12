@@ -805,20 +805,27 @@ def _draw_password_field(screen, font, rect, text, active, cursor_blink, ime_tex
     screen.blit(ts, (rect.x + 8, rect.y + 8))
 
 
-def _fetch_skill_levels(http_url):
-    """Fetch skill levels from server, return list or fallback."""
+# Default skill levels (used immediately while server fetch runs in background)
+_DEFAULT_SKILL_LEVELS = [
+    "10級", "9級", "8級", "7級", "6級",
+    "5級", "4級", "3級", "2級", "1級",
+    "初段", "2段", "3段", "4段", "5段",
+    "6段", "7段", "8段", "9段",
+]
+
+
+def _fetch_skill_levels_bg(http_url, result_holder):
+    """Fetch skill levels from server in background thread."""
     try:
         req = urllib.request.Request(f"{http_url}/skill_levels", method="GET")
-        with urllib.request.urlopen(req, timeout=60) as resp:
+        with urllib.request.urlopen(req, timeout=10) as resp:
             data = json.loads(resp.read().decode("utf-8"))
-            return data.get("skill_levels", [])
+            fetched = data.get("skill_levels", [])
+            if fetched:
+                result_holder.clear()
+                result_holder.extend(fetched)
     except Exception:
-        return [
-            "10級", "9級", "8級", "7級", "6級",
-            "5級", "4級", "3級", "2級", "1級",
-            "初段", "2段", "3段", "4段", "5段",
-            "6段", "7段", "8段", "9段",
-        ]
+        pass  # keep default
 
 
 def _draw_dropdown_field(screen, font, rect, text, active, items, open_dropdown, hover_idx):
@@ -859,23 +866,39 @@ def auth_screen(screen, font, btn_font, server_base_url):
     """Login / Registration screen. Returns (nickname, name, skill_level) or None if quit."""
     clock = pygame.time.Clock()
     http_url = server_base_url.replace("wss://", "https://").replace("ws://", "http://")
-    skill_levels = _fetch_skill_levels(http_url)
+    skill_levels = list(_DEFAULT_SKILL_LEVELS)  # start with defaults immediately
+    # Fetch from server in background (won't block UI)
+    threading.Thread(target=_fetch_skill_levels_bg, args=(http_url, skill_levels), daemon=True).start()
 
-    # Try auto-login with saved credentials
+    # Try auto-login with saved credentials (non-blocking)
     saved = _load_credentials()
+    auto_login_result = [None]  # mutable holder for background thread result
+    auto_login_done = [False]
     if saved:
-        # Show "connecting" message while waiting for server (Render.com cold start can take 50+ sec)
-        screen.fill(BG_DARK)
-        msg = font.render("\u30b5\u30fc\u30d0\u30fc\u306b\u63a5\u7d9a\u4e2d...", True, WHITE)
-        screen.blit(msg, msg.get_rect(center=(screen.get_width() // 2, screen.get_height() // 2)))
-        pygame.display.flip()
-        # Process events to keep window responsive
-        pygame.event.pump()
-        result = _http_post_json(f"{http_url}/login", {
-            "nickname": saved["nickname"],
-            "password": saved["password"],
-        })
-        if result.get("ok"):
+        def _do_auto_login():
+            result = _http_post_json(f"{http_url}/login", {
+                "nickname": saved["nickname"],
+                "password": saved["password"],
+            })
+            auto_login_result[0] = result
+            auto_login_done[0] = True
+        threading.Thread(target=_do_auto_login, daemon=True).start()
+        # Show connecting screen while auto-login runs in background
+        while not auto_login_done[0]:
+            for ev in pygame.event.get():
+                if ev.type == pygame.QUIT:
+                    return None
+                elif ev.type == pygame.VIDEORESIZE:
+                    nw = max(500, ev.w)
+                    nh = max(400, ev.h)
+                    screen = pygame.display.set_mode((nw, nh), pygame.RESIZABLE)
+            screen.fill(BG_DARK)
+            msg = font.render("\u30b5\u30fc\u30d0\u30fc\u306b\u63a5\u7d9a\u4e2d...", True, WHITE)
+            screen.blit(msg, msg.get_rect(center=(screen.get_width() // 2, screen.get_height() // 2)))
+            pygame.display.flip()
+            clock.tick(30)
+        result = auto_login_result[0]
+        if result and result.get("ok"):
             return (result["nickname"], result.get("name", saved.get("name", "")), result.get("skill_level", ""))
         # Saved credentials invalid, clear them
         _clear_credentials()
