@@ -6,7 +6,6 @@ import uuid
 import os
 import time as time_module
 import asyncio
-import sqlite3
 import bcrypt
 from typing import Optional
 
@@ -21,40 +20,67 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Fly.io instance identification
-FLY_ALLOC_ID = os.environ.get("FLY_ALLOC_ID", "local")
+# --------------- Database ---------------
+# Use PostgreSQL if DATABASE_URL is set, otherwise fallback to SQLite
 
-# --------------- SQLite Database ---------------
+DATABASE_URL = os.environ.get("DATABASE_URL", "")
 
-# Use /data/app.db for persistent volume on Fly.io, fallback to local
-HAS_VOLUME = os.path.isdir("/data")
-DB_PATH = "/data/app.db" if HAS_VOLUME else "app.db"
+if DATABASE_URL:
+    import psycopg
+    import psycopg.rows
+    import psycopg.errors
 
+    def get_db():
+        conn = psycopg.connect(DATABASE_URL, row_factory=psycopg.rows.dict_row)
+        return conn
 
-def get_db() -> sqlite3.Connection:
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
-    return conn
+    _PH = "%s"
+    _SERIAL = "SERIAL"
+    _INTEGRITY_ERROR = psycopg.errors.UniqueViolation
+else:
+    import sqlite3
+
+    _db_dir = "/data" if os.path.isdir("/data") else "."
+    _DB_PATH = os.path.join(_db_dir, "app.db")
+
+    def get_db():
+        conn = sqlite3.connect(_DB_PATH)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode=WAL")
+        return conn
+
+    _PH = "?"
+    _SERIAL = "INTEGER"
+    _INTEGRITY_ERROR = sqlite3.IntegrityError
 
 
 def init_db():
     conn = get_db()
-    conn.execute("""
+    conn.execute(f"""
         CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id {_SERIAL} PRIMARY KEY,
             name TEXT NOT NULL,
             nickname TEXT NOT NULL UNIQUE,
             password_hash TEXT NOT NULL,
             skill_level TEXT NOT NULL DEFAULT '',
+            rating INTEGER NOT NULL DEFAULT 1500,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
-    # Add skill_level column if it doesn't exist (migration for existing DB)
-    try:
-        conn.execute("ALTER TABLE users ADD COLUMN skill_level TEXT NOT NULL DEFAULT ''")
-    except sqlite3.OperationalError:
-        pass  # column already exists
+    # Migration: add columns if they don't exist
+    if DATABASE_URL:
+        for col, defn in [("rating", "INTEGER NOT NULL DEFAULT 1500")]:
+            try:
+                conn.execute(f"ALTER TABLE users ADD COLUMN {col} {defn}")
+            except Exception:
+                pass
+    else:
+        for col, defn in [("skill_level", "TEXT NOT NULL DEFAULT ''"),
+                          ("rating", "INTEGER NOT NULL DEFAULT 1500")]:
+            try:
+                conn.execute(f"ALTER TABLE users ADD COLUMN {col} {defn}")
+            except Exception:
+                pass
     conn.commit()
     conn.close()
 
@@ -62,6 +88,29 @@ def init_db():
 @app.on_event("startup")
 async def startup_event():
     init_db()
+
+
+# --------------- Skill Level Utilities ---------------
+
+SKILL_LEVELS = [
+    "10級", "9級", "8級", "7級", "6級",
+    "5級", "4級", "3級", "2級", "1級",
+    "初段", "2段", "3段", "4段", "5段",
+    "6段", "7段", "8段", "9段",
+]
+
+
+def skill_to_num(s: str) -> int:
+    """Convert skill level string to numeric index for comparison."""
+    try:
+        return SKILL_LEVELS.index(s)
+    except ValueError:
+        return 10
+
+
+def skill_distance(a: str, b: str) -> int:
+    """Return the distance between two skill levels."""
+    return abs(skill_to_num(a) - skill_to_num(b))
 
 
 # --------------- Auth Models ---------------
@@ -81,78 +130,84 @@ class LoginRequest(BaseModel):
 # --------------- Auth Endpoints ---------------
 
 @app.post("/register")
-async def register(req: RegisterRequest, request: Request):
+async def register(req: RegisterRequest):
     """Register a new user."""
-    # If this machine has no volume, replay to the one that does
-    if not HAS_VOLUME and FLY_ALLOC_ID != "local":
-        return JSONResponse(content={"status": "replaying"}, headers={"fly-replay": "elsewhere=true"})
     name = req.name.strip()
     nickname = req.nickname.strip()
     password = req.password
 
     if not name:
-        return JSONResponse(status_code=400, content={"ok": False, "error": "\u540d\u524d\u3092\u5165\u529b\u3057\u3066\u304f\u3060\u3055\u3044"})
+        return JSONResponse(status_code=400,
+                            content={"ok": False, "error": "名前を入力してください"})
     if not nickname:
-        return JSONResponse(status_code=400, content={"ok": False, "error": "\u30cb\u30c3\u30af\u30cd\u30fc\u30e0\u3092\u5165\u529b\u3057\u3066\u304f\u3060\u3055\u3044"})
+        return JSONResponse(status_code=400,
+                            content={"ok": False, "error": "ニックネームを入力してください"})
     if len(nickname) < 2:
-        return JSONResponse(status_code=400, content={"ok": False, "error": "\u30cb\u30c3\u30af\u30cd\u30fc\u30e0\u306f2\u6587\u5b57\u4ee5\u4e0a\u3067\u3059"})
+        return JSONResponse(status_code=400,
+                            content={"ok": False, "error": "ニックネームは2文字以上です"})
     if not password or len(password) < 4:
-        return JSONResponse(status_code=400, content={"ok": False, "error": "\u30d1\u30b9\u30ef\u30fc\u30c9\u306f4\u6587\u5b57\u4ee5\u4e0a\u3067\u3059"})
+        return JSONResponse(status_code=400,
+                            content={"ok": False, "error": "パスワードは4文字以上です"})
 
     skill_level = req.skill_level.strip()
+    if skill_level and skill_level not in SKILL_LEVELS:
+        return JSONResponse(status_code=400,
+                            content={"ok": False, "error": "無効な棋力です"})
 
     password_hash = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
 
     conn = get_db()
     try:
         conn.execute(
-            "INSERT INTO users (name, nickname, password_hash, skill_level) VALUES (?, ?, ?, ?)",
+            f"INSERT INTO users (name, nickname, password_hash, skill_level) VALUES ({_PH}, {_PH}, {_PH}, {_PH})",
             (name, nickname, password_hash, skill_level),
         )
         conn.commit()
         return {"ok": True, "nickname": nickname, "name": name, "skill_level": skill_level}
-    except sqlite3.IntegrityError:
-        return JSONResponse(status_code=409, content={"ok": False, "error": "\u305d\u306e\u30cb\u30c3\u30af\u30cd\u30fc\u30e0\u306f\u65e2\u306b\u4f7f\u308f\u308c\u3066\u3044\u307e\u3059"})
+    except _INTEGRITY_ERROR:
+        if DATABASE_URL:
+            conn.rollback()
+        return JSONResponse(status_code=409,
+                            content={"ok": False, "error": "そのニックネームは既に使われています"})
     finally:
         conn.close()
 
 
 @app.post("/login")
-async def login(req: LoginRequest, request: Request):
+async def login(req: LoginRequest):
     """Login with nickname and password."""
-    # If this machine has no volume, replay to the one that does
-    if not HAS_VOLUME and FLY_ALLOC_ID != "local":
-        return JSONResponse(content={"status": "replaying"}, headers={"fly-replay": "elsewhere=true"})
     nickname = req.nickname.strip()
     password = req.password
 
     if not nickname or not password:
-        return JSONResponse(status_code=400, content={"ok": False, "error": "\u30cb\u30c3\u30af\u30cd\u30fc\u30e0\u3068\u30d1\u30b9\u30ef\u30fc\u30c9\u3092\u5165\u529b\u3057\u3066\u304f\u3060\u3055\u3044"})
+        return JSONResponse(status_code=400,
+                            content={"ok": False, "error": "ニックネームとパスワードを入力してください"})
 
     conn = get_db()
     try:
         row = conn.execute(
-            "SELECT name, nickname, password_hash, skill_level FROM users WHERE nickname = ?",
+            f"SELECT name, nickname, password_hash, skill_level FROM users WHERE nickname = {_PH}",
             (nickname,),
         ).fetchone()
         if row is None:
-            return JSONResponse(status_code=401, content={"ok": False, "error": "\u30cb\u30c3\u30af\u30cd\u30fc\u30e0\u304c\u898b\u3064\u304b\u308a\u307e\u305b\u3093"})
+            return JSONResponse(status_code=401,
+                                content={"ok": False, "error": "ニックネームが見つかりません"})
         if not bcrypt.checkpw(password.encode("utf-8"), row["password_hash"].encode("utf-8")):
-            return JSONResponse(status_code=401, content={"ok": False, "error": "\u30d1\u30b9\u30ef\u30fc\u30c9\u304c\u9055\u3044\u307e\u3059"})
-        return {"ok": True, "nickname": row["nickname"], "name": row["name"], "skill_level": row["skill_level"]}
+            return JSONResponse(status_code=401,
+                                content={"ok": False, "error": "パスワードが違います"})
+        return {"ok": True, "nickname": row["nickname"], "name": row["name"],
+                "skill_level": row["skill_level"]}
     finally:
         conn.close()
 
 
 @app.get("/admin/users")
-async def admin_users(request: Request):
+async def admin_users():
     """List all registered users (for admin panel)."""
-    if not HAS_VOLUME and FLY_ALLOC_ID != "local":
-        return JSONResponse(content={"status": "replaying"}, headers={"fly-replay": "elsewhere=true"})
     conn = get_db()
     try:
         rows = conn.execute(
-            "SELECT id, name, nickname, skill_level, created_at FROM users ORDER BY id"
+            "SELECT id, name, nickname, skill_level, rating, created_at FROM users ORDER BY id"
         ).fetchall()
         users = [
             {
@@ -160,13 +215,20 @@ async def admin_users(request: Request):
                 "name": r["name"],
                 "nickname": r["nickname"],
                 "skill_level": r["skill_level"],
-                "created_at": r["created_at"],
+                "rating": r["rating"],
+                "created_at": str(r["created_at"]) if r["created_at"] else "",
             }
             for r in rows
         ]
         return {"ok": True, "users": users}
     finally:
         conn.close()
+
+
+@app.get("/skill_levels")
+async def get_skill_levels():
+    """Return the list of valid skill levels."""
+    return {"skill_levels": SKILL_LEVELS}
 
 
 @app.get("/healthz")
@@ -260,7 +322,6 @@ class Room:
 
 
 rooms: dict[str, Room] = {}
-waiting_room: Optional[str] = None
 
 
 # --------------- Go Rules (server-side) ---------------
@@ -329,6 +390,218 @@ def try_place_stone(board: list[list[int]], row: int, col: int,
     return True, captured, new_ko
 
 
+# --------------- Lobby (Match Request System) ---------------
+
+class LobbyUser:
+    def __init__(self, ws: WebSocket, nickname: str, name: str, skill_level: str):
+        self.ws = ws
+        self.nickname = nickname
+        self.name = name
+        self.skill_level = skill_level
+        self.looking = False
+        self.main_time = 60
+        self.byoyomi = 30
+        self.pending_from: Optional[str] = None
+        self.waiting_for: Optional[str] = None
+        self.declined_set: set[str] = set()
+        self.join_time = 0.0
+
+
+lobby_users: dict[str, LobbyUser] = {}
+
+
+async def broadcast_lobby_status():
+    """Send lobby status to all connected lobby users."""
+    count = len(lobby_users)
+    looking = sum(1 for u in lobby_users.values() if u.looking)
+    msg = {"type": "lobby_status", "online_count": count, "looking_count": looking}
+    for user in list(lobby_users.values()):
+        try:
+            await user.ws.send_json(msg)
+        except Exception:
+            pass
+
+
+async def try_match(user: LobbyUser):
+    """Try to find a match for the given user."""
+    best: Optional[LobbyUser] = None
+    best_dist = float("inf")
+
+    for nick, other in lobby_users.items():
+        if nick == user.nickname:
+            continue
+        if not other.looking:
+            continue
+        if other.pending_from is not None:
+            continue
+        if other.waiting_for is not None:
+            continue
+        if nick in user.declined_set or user.nickname in other.declined_set:
+            continue
+
+        dist = skill_distance(user.skill_level, other.skill_level)
+        if dist < best_dist:
+            best = other
+            best_dist = dist
+
+    if best is not None:
+        best.pending_from = user.nickname
+        user.waiting_for = best.nickname
+        try:
+            await best.ws.send_json({
+                "type": "match_request",
+                "from_nickname": user.nickname,
+                "from_name": user.name,
+                "from_skill": user.skill_level,
+                "main_time": user.main_time,
+                "byoyomi": user.byoyomi,
+            })
+        except Exception:
+            best.pending_from = None
+            user.waiting_for = None
+            return
+        try:
+            await user.ws.send_json({
+                "type": "match_sent",
+                "to_nickname": best.nickname,
+                "to_name": best.name,
+                "to_skill": best.skill_level,
+            })
+        except Exception:
+            pass
+    else:
+        try:
+            await user.ws.send_json({
+                "type": "waiting",
+                "message": "対戦相手を探しています...",
+            })
+        except Exception:
+            pass
+
+
+@app.websocket("/ws/lobby/{nickname}")
+async def lobby_websocket(websocket: WebSocket, nickname: str):
+    """Lobby WebSocket for match request system."""
+    await websocket.accept()
+
+    conn = get_db()
+    try:
+        row = conn.execute(
+            f"SELECT name, skill_level FROM users WHERE nickname = {_PH}",
+            (nickname,),
+        ).fetchone()
+    finally:
+        conn.close()
+
+    if not row:
+        await websocket.send_json({"type": "error",
+                                   "message": "ユーザーが見つかりません"})
+        await websocket.close()
+        return
+
+    user = LobbyUser(websocket, nickname, row["name"], row["skill_level"])
+    user.join_time = time_module.time()
+    lobby_users[nickname] = user
+
+    await broadcast_lobby_status()
+
+    try:
+        while True:
+            data = await websocket.receive_json()
+            msg_type = data.get("type")
+
+            if msg_type == "request_match":
+                user.looking = True
+                user.main_time = data.get("main_time", 60)
+                user.byoyomi = data.get("byoyomi", 30)
+                user.declined_set.clear()
+                await broadcast_lobby_status()
+                await try_match(user)
+
+            elif msg_type == "cancel_request":
+                if user.waiting_for and user.waiting_for in lobby_users:
+                    other = lobby_users[user.waiting_for]
+                    if other.pending_from == user.nickname:
+                        other.pending_from = None
+                        try:
+                            await other.ws.send_json({"type": "match_cancelled"})
+                        except Exception:
+                            pass
+                user.looking = False
+                user.waiting_for = None
+                user.pending_from = None
+                await broadcast_lobby_status()
+
+            elif msg_type == "accept_match":
+                requester_nick = user.pending_from
+                if requester_nick and requester_nick in lobby_users:
+                    requester = lobby_users[requester_nick]
+                    room_code = str(uuid.uuid4())[:8]
+                    room = Room(room_code, main_time=requester.main_time,
+                                byoyomi=requester.byoyomi)
+                    rooms[room_code] = room
+
+                    for target, opponent in [(requester, user), (user, requester)]:
+                        try:
+                            await target.ws.send_json({
+                                "type": "match_accepted",
+                                "room_code": room_code,
+                                "opponent_name": opponent.name,
+                                "opponent_nickname": opponent.nickname,
+                                "opponent_skill": opponent.skill_level,
+                                "main_time": requester.main_time,
+                                "byoyomi": requester.byoyomi,
+                            })
+                        except Exception:
+                            pass
+
+                    requester.looking = False
+                    requester.waiting_for = None
+                    user.looking = False
+                    user.pending_from = None
+                    await broadcast_lobby_status()
+
+            elif msg_type == "decline_match":
+                requester_nick = user.pending_from
+                user.pending_from = None
+                if requester_nick and requester_nick in lobby_users:
+                    requester = lobby_users[requester_nick]
+                    requester.waiting_for = None
+                    requester.declined_set.add(user.nickname)
+                    user.declined_set.add(requester_nick)
+                    try:
+                        await requester.ws.send_json({"type": "match_declined",
+                                                      "by": user.nickname})
+                    except Exception:
+                        pass
+                    if requester.looking:
+                        await try_match(requester)
+
+    except WebSocketDisconnect:
+        pass
+    except Exception:
+        pass
+    finally:
+        if user.waiting_for and user.waiting_for in lobby_users:
+            other = lobby_users[user.waiting_for]
+            if other.pending_from == user.nickname:
+                other.pending_from = None
+                try:
+                    await other.ws.send_json({"type": "match_cancelled"})
+                except Exception:
+                    pass
+        if user.pending_from and user.pending_from in lobby_users:
+            other = lobby_users[user.pending_from]
+            other.waiting_for = None
+            if other.looking:
+                try:
+                    await try_match(other)
+                except Exception:
+                    pass
+        lobby_users.pop(nickname, None)
+        await broadcast_lobby_status()
+
+
 # --------------- REST ---------------
 
 @app.get("/rooms")
@@ -341,43 +614,6 @@ async def list_rooms():
             "started": room.started,
         })
     return {"rooms": room_list}
-
-
-@app.post("/find_match")
-async def find_match(request: Request, name: str = "",
-                     main_time: int = 60, byoyomi: int = 30):
-    """Find or create a match room."""
-    global waiting_room
-
-    if waiting_room and waiting_room in rooms and not rooms[waiting_room].is_full():
-        wr = rooms[waiting_room]
-        return JSONResponse(content={
-            "room_code": waiting_room,
-            "instance_id": FLY_ALLOC_ID,
-            "status": "joining",
-            "main_time": wr.main_time,
-            "byoyomi": wr.byoyomi,
-        })
-
-    replay_src = request.headers.get("fly-replay-src", "")
-    if FLY_ALLOC_ID != "local" and not replay_src:
-        return JSONResponse(
-            content={"status": "checking_other_instances"},
-            headers={"fly-replay": "elsewhere=true"},
-        )
-
-    room_code = str(uuid.uuid4())[:8]
-    room = Room(room_code, main_time=main_time, byoyomi=byoyomi)
-    rooms[room_code] = room
-    waiting_room = room_code
-
-    return JSONResponse(content={
-        "room_code": room_code,
-        "instance_id": FLY_ALLOC_ID,
-        "status": "created",
-        "main_time": main_time,
-        "byoyomi": byoyomi,
-    })
 
 
 # --------------- Time checker background task ---------------
@@ -414,17 +650,15 @@ async def time_checker(room: Room):
         pass
 
 
-# --------------- WebSocket ---------------
+# --------------- Game WebSocket ---------------
 
 @app.websocket("/ws/{room_code}/{player_name}")
 async def websocket_endpoint(websocket: WebSocket, room_code: str, player_name: str):
-    global waiting_room
     await websocket.accept()
 
     if room_code not in rooms:
         room = Room(room_code)
         rooms[room_code] = room
-        waiting_room = room_code
 
     room = rooms[room_code]
     player = Player(websocket, player_name)
@@ -440,8 +674,6 @@ async def websocket_endpoint(websocket: WebSocket, room_code: str, player_name: 
         player.color = 1
     else:
         player.color = 2
-        if waiting_room == room_code:
-            waiting_room = None
         room.started = True
 
     await player.ws.send_json({
@@ -469,7 +701,7 @@ async def websocket_endpoint(websocket: WebSocket, room_code: str, player_name: 
     else:
         await player.ws.send_json({
             "type": "waiting",
-            "message": "\u5bfe\u6226\u76f8\u624b\u3092\u5f85\u3063\u3066\u3044\u307e\u3059...",
+            "message": "対戦相手を待っています...",
         })
 
     try:
@@ -480,17 +712,17 @@ async def websocket_endpoint(websocket: WebSocket, room_code: str, player_name: 
             if msg_type == "place_stone":
                 row, col = data["row"], data["col"]
                 if player.color != room.current_player:
-                    await player.ws.send_json({"type": "error", "message": "\u76f8\u624b\u306e\u756a\u3067\u3059"})
+                    await player.ws.send_json({"type": "error", "message": "相手の番です"})
                     continue
                 if not room.started or room.game_over:
-                    await player.ws.send_json({"type": "error", "message": "\u5bfe\u6226\u76f8\u624b\u3092\u5f85\u3063\u3066\u3044\u307e\u3059"})
+                    await player.ws.send_json({"type": "error", "message": "対戦相手を待っています"})
                     continue
 
                 ok, captured, new_ko = try_place_stone(
                     room.board, row, col, player.color, room.ko_point
                 )
                 if not ok:
-                    await player.ws.send_json({"type": "error", "message": "\u305d\u3053\u306b\u306f\u7f6e\u3051\u307e\u305b\u3093"})
+                    await player.ws.send_json({"type": "error", "message": "そこには置けません"})
                     continue
 
                 time_ok = room.consume_time()
@@ -575,14 +807,12 @@ async def websocket_endpoint(websocket: WebSocket, room_code: str, player_name: 
             try:
                 await opponent.ws.send_json({
                     "type": "opponent_disconnected",
-                    "message": f"{player.name}\u304c\u5207\u65ad\u3057\u307e\u3057\u305f",
+                    "message": f"{player.name}が切断しました",
                 })
             except Exception:
                 pass
         room.players = [p for p in room.players if p is not player]
         if len(room.players) == 0:
             rooms.pop(room.room_id, None)
-            if waiting_room == room.room_id:
-                waiting_room = None
     except Exception:
         pass

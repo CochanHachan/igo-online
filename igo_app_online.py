@@ -660,22 +660,6 @@ class NetworkClient:
         )
         self.thread.start()
 
-    def _find_match(self, server_url, player_name):
-        """Call /find_match HTTP endpoint to get room_code and instance_id."""
-        http_url = server_url.replace("wss://", "https://").replace("ws://", "http://")
-        mt, byo = self.time_control
-        encoded_name = urllib.parse.quote(player_name, safe="")
-        url = f"{http_url}/find_match?name={encoded_name}&main_time={mt}&byoyomi={byo}"
-        req = urllib.request.Request(url, method="POST")
-        req.add_header("Content-Type", "application/json")
-        try:
-            with urllib.request.urlopen(req, timeout=10) as resp:
-                data = json.loads(resp.read().decode())
-                return data.get("room_code"), data.get("instance_id")
-        except Exception as e:
-            self.error_msg = f"Matchmaking failed: {e}"
-            return None, None
-
     def disconnect(self):
         self.running = False
         if self.loop:
@@ -696,18 +680,9 @@ class NetworkClient:
             self.running = False
 
     async def _ws_handler(self, server_url, player_name):
-        room_code, instance_id = self._find_match(server_url, player_name)
-        if not room_code:
-            self.connected = False
-            return
-
-        url = f"{server_url}/ws/{room_code}/{urllib.parse.quote(player_name, safe='')}"
-        extra_headers = {}
-        if instance_id and instance_id != "local":
-            extra_headers["fly-force-instance-id"] = instance_id
-
+        url = f"{server_url}/ws/{self.room_id}/{urllib.parse.quote(player_name, safe='')}"
         try:
-            async with websockets.connect(url, additional_headers=extra_headers) as ws:
+            async with websockets.connect(url) as ws:
                 self.connected = True
                 recv_task = asyncio.create_task(self._recv_loop(ws))
                 send_task = asyncio.create_task(self._send_loop(ws))
@@ -830,10 +805,61 @@ def _draw_password_field(screen, font, rect, text, active, cursor_blink, ime_tex
     screen.blit(ts, (rect.x + 8, rect.y + 8))
 
 
+def _fetch_skill_levels(http_url):
+    """Fetch skill levels from server, return list or fallback."""
+    try:
+        req = urllib.request.Request(f"{http_url}/skill_levels", method="GET")
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            return data.get("skill_levels", [])
+    except Exception:
+        return [
+            "10級", "9級", "8級", "7級", "6級",
+            "5級", "4級", "3級", "2級", "1級",
+            "初段", "2段", "3段", "4段", "5段",
+            "6段", "7段", "8段", "9段",
+        ]
+
+
+def _draw_dropdown_field(screen, font, rect, text, active, items, open_dropdown, hover_idx):
+    """Draw a dropdown selector field."""
+    color = INPUT_ACTIVE if active else INPUT_BG
+    pygame.draw.rect(screen, color, rect, border_radius=4)
+    pygame.draw.rect(screen, WHITE, rect, 1, border_radius=4)
+    display = text if text else "選択してください"
+    text_color = WHITE if text else (120, 120, 120)
+    ts = font.render(display, True, text_color)
+    screen.blit(ts, (rect.x + 8, rect.y + 8))
+    # Draw arrow
+    ax = rect.right - 20
+    ay = rect.centery
+    if open_dropdown:
+        pygame.draw.polygon(screen, WHITE, [(ax - 5, ay + 3), (ax + 5, ay + 3), (ax, ay - 3)])
+    else:
+        pygame.draw.polygon(screen, WHITE, [(ax - 5, ay - 3), (ax + 5, ay - 3), (ax, ay + 3)])
+    # Draw dropdown list if open
+    if open_dropdown and items:
+        list_h = min(len(items), 8) * 28
+        list_rect = pygame.Rect(rect.x, rect.bottom + 2, rect.width, list_h)
+        pygame.draw.rect(screen, (50, 50, 55), list_rect, border_radius=4)
+        pygame.draw.rect(screen, (100, 100, 100), list_rect, 1, border_radius=4)
+        # Scrollable area
+        for i, item in enumerate(items):
+            if i >= 8:
+                break
+            item_rect = pygame.Rect(rect.x + 2, rect.bottom + 2 + i * 28, rect.width - 4, 28)
+            if i == hover_idx:
+                pygame.draw.rect(screen, MENU_HOVER_BG, item_rect, border_radius=2)
+            it = font.render(item, True, WHITE)
+            screen.blit(it, (item_rect.x + 8, item_rect.y + 5))
+    return rect
+
+
 def auth_screen(screen, font, btn_font, server_base_url):
-    """Login / Registration screen. Returns (nickname, name) or None if quit."""
+    """Login / Registration screen. Returns (nickname, name, skill_level) or None if quit."""
     clock = pygame.time.Clock()
     http_url = server_base_url.replace("wss://", "https://").replace("ws://", "http://")
+    skill_levels = _fetch_skill_levels(http_url)
 
     # Try auto-login with saved credentials
     saved = _load_credentials()
@@ -850,7 +876,7 @@ def auth_screen(screen, font, btn_font, server_base_url):
             "password": saved["password"],
         })
         if result.get("ok"):
-            return (result["nickname"], result.get("name", saved.get("name", "")))
+            return (result["nickname"], result.get("name", saved.get("name", "")), result.get("skill_level", ""))
         # Saved credentials invalid, clear them
         _clear_credentials()
 
@@ -872,6 +898,10 @@ def auth_screen(screen, font, btn_font, server_base_url):
     message = ""  # status/error message
     message_color = RED
     message_timer = 0
+    # Skill level dropdown state
+    skill_dropdown_open = False
+    skill_dropdown_hover = -1
+    skill_dropdown_scroll = 0
 
     LINK_COLOR = (100, 180, 255)
     LINK_HOVER_COLOR = (140, 210, 255)
@@ -880,23 +910,22 @@ def auth_screen(screen, font, btn_font, server_base_url):
 
     def get_fields():
         if mode == "register":
-            return [reg_name, reg_nickname, reg_password, reg_skill_level]
+            return [reg_name, reg_nickname, reg_password]
         else:
             return [login_nickname, login_password]
 
     def set_field(idx, val):
-        nonlocal reg_name, reg_nickname, reg_password, reg_skill_level, login_nickname, login_password
+        nonlocal reg_name, reg_nickname, reg_password, login_nickname, login_password
         if mode == "register":
             if idx == 0: reg_name = val
             elif idx == 1: reg_nickname = val
             elif idx == 2: reg_password = val
-            elif idx == 3: reg_skill_level = val
         else:
             if idx == 0: login_nickname = val
             elif idx == 1: login_password = val
 
     def field_count():
-        return 4 if mode == "register" else 2
+        return 3 if mode == "register" else 2
 
     def commit_ime():
         """Commit any pending IME composition text to the current field."""
@@ -929,7 +958,7 @@ def auth_screen(screen, font, btn_font, server_base_url):
             if save_creds:
                 _save_credentials(login_nickname, login_password, result.get("name", ""))
             pygame.key.stop_text_input()
-            return (result["nickname"], result.get("name", ""))
+            return (result["nickname"], result.get("name", ""), result.get("skill_level", ""))
         else:
             message = result.get("error", "\u30ed\u30b0\u30a4\u30f3\u5931\u6557")
             message_color = RED
@@ -985,6 +1014,9 @@ def auth_screen(screen, font, btn_font, server_base_url):
                 ime_composing = ""
             elif event.type == pygame.TEXTEDITING:
                 ime_composing = event.text
+            elif event.type == pygame.MOUSEWHEEL and skill_dropdown_open:
+                skill_dropdown_scroll = max(0, min(skill_dropdown_scroll - event.y,
+                                                   max(0, len(skill_levels) - 8)))
             elif event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_TAB:
                     switch_field((active_field + 1) % field_count())
@@ -1192,24 +1224,181 @@ def auth_screen(screen, font, btn_font, server_base_url):
         clock.tick(30)
 
 
-# --------------- Connection Screen ---------------
+# --------------- Lobby Screen ---------------
 
-def connection_screen(screen, font, btn_font, nickname="Player"):
+class LobbyClient:
+    """WebSocket client for the lobby/match request system."""
+    def __init__(self):
+        self.recv_queue = queue.Queue()
+        self.connected = False
+        self.running = False
+        self.thread = None
+        self.loop = None
+        self._ws = None
+        self._send_queue = queue.Queue()
+        self.error_msg = ""
+
+    def connect(self, ws_url, nickname):
+        self.running = True
+        self.error_msg = ""
+        self.thread = threading.Thread(
+            target=self._run, args=(ws_url, nickname), daemon=True
+        )
+        self.thread.start()
+
+    def _run(self, ws_url, nickname):
+        self.loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(self.loop)
+        try:
+            self.loop.run_until_complete(self._handler(ws_url, nickname))
+        except Exception as e:
+            self.error_msg = str(e)
+        finally:
+            self.connected = False
+            self.running = False
+
+    async def _handler(self, ws_url, nickname):
+        url = f"{ws_url}/ws/lobby/{urllib.parse.quote(nickname, safe='')}"
+        try:
+            async with websockets.connect(url) as ws:
+                self._ws = ws
+                self.connected = True
+                recv_task = asyncio.create_task(self._recv(ws))
+                send_task = asyncio.create_task(self._send(ws))
+                done, pending = await asyncio.wait(
+                    [recv_task, send_task], return_when=asyncio.FIRST_COMPLETED
+                )
+                for t in pending:
+                    t.cancel()
+        except Exception as e:
+            self.error_msg = f"\u63a5\u7d9a\u5931\u6557: {e}"
+        finally:
+            self.connected = False
+
+    async def _recv(self, ws):
+        try:
+            async for message in ws:
+                data = json.loads(message)
+                self.recv_queue.put(data)
+                if not self.running:
+                    break
+        except websockets.exceptions.ConnectionClosed:
+            pass
+
+    async def _send(self, ws):
+        while self.running:
+            try:
+                msg = await asyncio.get_event_loop().run_in_executor(
+                    None, lambda: self._send_queue.get(timeout=0.1)
+                )
+                await ws.send(json.dumps(msg))
+            except queue.Empty:
+                continue
+            except Exception:
+                break
+
+    def send(self, msg):
+        self._send_queue.put(msg)
+
+    def disconnect(self):
+        self.running = False
+        if self.loop:
+            self.loop.call_soon_threadsafe(self.loop.stop)
+
+
+def lobby_screen(screen, font, btn_font, server_base_url, nickname, name, skill_level):
+    """Lobby screen where users can request matches.
+    Returns (room_code, main_time, byoyomi) or None if quit."""
     clock = pygame.time.Clock()
-    server_url = "wss://igo-online.onrender.com"
-    player_name = nickname
-    active_field = 0
-    cursor_blink = 0
-    time_preset_idx = 0  # default: 1min + 30sec
-    ime_composing = ""  # IME composition string (before confirmation)
+    ws_url = server_base_url
 
-    # Enable text input for IME support (Japanese kanji input etc.)
-    pygame.key.start_text_input()
+    lobby = LobbyClient()
+    lobby.connect(ws_url, nickname)
+
+    time_preset_idx = 0
+    status_msg = "\u30ed\u30d3\u30fc\u306b\u63a5\u7d9a\u4e2d..."
+    status_color = YELLOW
+    online_count = 0
+    looking_count = 0
+    looking = False  # are we looking for a match?
+    match_result = None  # will be set when match is accepted
+
+    # Match request UI state
+    pending_request = None  # dict with from_nickname, from_name, from_skill, main_time, byoyomi
+    waiting_for = None  # nickname we sent request to
+    match_sent_info = None  # info about who we sent to
 
     while True:
+        # Process lobby messages
+        while not lobby.recv_queue.empty():
+            msg = lobby.recv_queue.get_nowait()
+            msg_type = msg.get("type")
+
+            if msg_type == "lobby_status":
+                online_count = msg.get("online_count", 0)
+                looking_count = msg.get("looking_count", 0)
+                if not looking:
+                    status_msg = f"\u30ed\u30d3\u30fc: {online_count}\u4eba\u63a5\u7d9a\u4e2d / {looking_count}\u4eba\u5bfe\u5c40\u5f85\u3061"
+                    status_color = WHITE
+
+            elif msg_type == "waiting":
+                status_msg = msg.get("message", "\u5bfe\u6226\u76f8\u624b\u3092\u63a2\u3057\u3066\u3044\u307e\u3059...")
+                status_color = YELLOW
+
+            elif msg_type == "match_request":
+                pending_request = {
+                    "from_nickname": msg["from_nickname"],
+                    "from_name": msg["from_name"],
+                    "from_skill": msg.get("from_skill", ""),
+                    "main_time": msg.get("main_time", 60),
+                    "byoyomi": msg.get("byoyomi", 30),
+                }
+                status_msg = f"{msg['from_name']} ({msg.get('from_skill', '?')}) \u304b\u3089\u5bfe\u5c40\u7533\u3057\u8fbc\u307f\uff01"
+                status_color = GREEN
+
+            elif msg_type == "match_sent":
+                waiting_for = msg.get("to_nickname")
+                match_sent_info = {
+                    "to_name": msg.get("to_name", ""),
+                    "to_skill": msg.get("to_skill", ""),
+                }
+                status_msg = f"{msg.get('to_name', '?')} ({msg.get('to_skill', '?')}) \u306b\u7533\u3057\u8fbc\u307f\u4e2d..."
+                status_color = YELLOW
+
+            elif msg_type == "match_accepted":
+                match_result = {
+                    "room_code": msg["room_code"],
+                    "main_time": msg.get("main_time", 60),
+                    "byoyomi": msg.get("byoyomi", 30),
+                }
+
+            elif msg_type == "match_declined":
+                waiting_for = None
+                match_sent_info = None
+                status_msg = "\u5bfe\u5c40\u304c\u65ad\u3089\u308c\u307e\u3057\u305f\u3002\u6b21\u306e\u76f8\u624b\u3092\u63a2\u3057\u3066\u3044\u307e\u3059..."
+                status_color = YELLOW
+
+            elif msg_type == "match_cancelled":
+                pending_request = None
+                status_msg = "\u7533\u3057\u8fbc\u307f\u304c\u30ad\u30e3\u30f3\u30bb\u30eb\u3055\u308c\u307e\u3057\u305f"
+                status_color = YELLOW
+
+            elif msg_type == "error":
+                status_msg = msg.get("message", "\u30a8\u30e9\u30fc")
+                status_color = RED
+
+        if lobby.error_msg and not lobby.connected:
+            status_msg = lobby.error_msg
+            status_color = RED
+
+        # If match accepted, return result
+        if match_result:
+            lobby.disconnect()
+            return (match_result["room_code"], match_result["main_time"], match_result["byoyomi"])
+
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
-                pygame.key.stop_text_input()
+                lobby.disconnect()
                 return None
             elif event.type == pygame.VIDEORESIZE:
                 nw = max(500, event.w)
@@ -1219,100 +1408,70 @@ def connection_screen(screen, font, btn_font, nickname="Player"):
                 mx, my = event.pos
                 w, h = screen.get_size()
                 cx = w // 2
-                field_x = cx - 180
-                if field_x <= mx <= field_x + 360:
-                    if h // 2 - 60 <= my <= h // 2 - 25:
-                        active_field = 0
-                    elif h // 2 + 10 <= my <= h // 2 + 45:
-                        active_field = 1
+
                 # Time preset buttons
                 for ti, (label, mt, byo) in enumerate(TIME_PRESETS):
                     bx = cx - 100 + ti * 120
-                    btn_r = pygame.Rect(bx, h // 2 + 60, 110, 32)
-                    if btn_r.collidepoint(mx, my):
+                    btn_r = pygame.Rect(bx, 200, 110, 32)
+                    if btn_r.collidepoint(mx, my) and not looking:
                         time_preset_idx = ti
-                # Connect button
-                connect_rect = pygame.Rect(cx - 80, h // 2 + 110, 160, 40)
-                if connect_rect.collidepoint(mx, my):
-                    pygame.key.stop_text_input()
-                    return (server_url, player_name, time_preset_idx)
-            elif event.type == pygame.TEXTINPUT:
-                # IME confirmed text or direct ASCII input
-                if active_field == 0:
-                    server_url += event.text
-                else:
-                    player_name += event.text
-                ime_composing = ""
-            elif event.type == pygame.TEXTEDITING:
-                # IME composing (e.g. showing候補 before Enter)
-                ime_composing = event.text
-            elif event.type == pygame.KEYDOWN:
-                if event.key == pygame.K_TAB:
-                    active_field = 1 - active_field
-                elif event.key == pygame.K_RETURN:
-                    if not ime_composing:
-                        pygame.key.stop_text_input()
-                        return (server_url, player_name, time_preset_idx)
-                elif event.key == pygame.K_BACKSPACE:
-                    if not ime_composing:
-                        if active_field == 0:
-                            server_url = server_url[:-1]
-                        else:
-                            player_name = player_name[:-1]
 
+                # Request match / Cancel button
+                action_btn_rect = pygame.Rect(cx - 100, 260, 200, 44)
+                if action_btn_rect.collidepoint(mx, my) and lobby.connected:
+                    if not looking:
+                        looking = True
+                        _, mt, byo = TIME_PRESETS[time_preset_idx]
+                        lobby.send({"type": "request_match", "main_time": mt, "byoyomi": byo})
+                        status_msg = "\u5bfe\u6226\u76f8\u624b\u3092\u63a2\u3057\u3066\u3044\u307e\u3059..."
+                        status_color = YELLOW
+                    else:
+                        looking = False
+                        waiting_for = None
+                        match_sent_info = None
+                        lobby.send({"type": "cancel_request"})
+                        status_msg = "\u30ad\u30e3\u30f3\u30bb\u30eb\u3057\u307e\u3057\u305f"
+                        status_color = WHITE
+
+                # Accept/Decline buttons for incoming request
+                if pending_request:
+                    accept_rect = pygame.Rect(cx - 130, 390, 120, 38)
+                    decline_rect = pygame.Rect(cx + 10, 390, 120, 38)
+                    if accept_rect.collidepoint(mx, my):
+                        lobby.send({"type": "accept_match"})
+                        pending_request = None
+                    elif decline_rect.collidepoint(mx, my):
+                        lobby.send({"type": "decline_match"})
+                        pending_request = None
+
+        # Draw
         w, h = screen.get_size()
         cx = w // 2
         screen.fill(BG_DARK)
 
-        title = font.render("Go Online", True, WHITE)
-        screen.blit(title, title.get_rect(center=(cx, h // 2 - 150)))
+        # Title
+        title = font.render("\u56f2\u7881\u30aa\u30f3\u30e9\u30a4\u30f3 - \u30ed\u30d3\u30fc", True, WHITE)
+        screen.blit(title, title.get_rect(center=(cx, 40)))
 
-        subtitle = btn_font.render("Connect to server for online play", True, (180, 180, 180))
-        screen.blit(subtitle, subtitle.get_rect(center=(cx, h // 2 - 120)))
+        # User info
+        user_info = btn_font.render(f"{name} ({nickname}) - {skill_level if skill_level else '\u672a\u8a2d\u5b9a'}", True, (200, 200, 200))
+        screen.blit(user_info, user_info.get_rect(center=(cx, 70)))
 
-        lbl1 = btn_font.render("Server URL:", True, WHITE)
-        screen.blit(lbl1, (cx - 180, h // 2 - 100))
-        field_rect1 = pygame.Rect(cx - 180, h // 2 - 80, 360, 35)
-        color1 = INPUT_ACTIVE if active_field == 0 else INPUT_BG
-        pygame.draw.rect(screen, color1, field_rect1, border_radius=4)
-        pygame.draw.rect(screen, WHITE, field_rect1, 1, border_radius=4)
-        cursor_blink = (cursor_blink + 1) % 60
-        ime_show_0 = ime_composing if active_field == 0 else ""
-        cursor_0 = "|" if active_field == 0 and cursor_blink < 30 and not ime_show_0 else ""
-        url_text = server_url + ime_show_0 + cursor_0
-        ts1 = btn_font.render(url_text, True, WHITE)
-        screen.blit(ts1, (field_rect1.x + 8, field_rect1.y + 8))
-        # Underline IME composing text
-        if ime_show_0:
-            comp_x = field_rect1.x + 8 + btn_font.size(server_url)[0]
-            comp_w = btn_font.size(ime_show_0)[0]
-            comp_y = field_rect1.y + 30
-            pygame.draw.line(screen, YELLOW, (comp_x, comp_y), (comp_x + comp_w, comp_y), 2)
+        # Status
+        status_surf = btn_font.render(status_msg, True, status_color)
+        screen.blit(status_surf, status_surf.get_rect(center=(cx, 100)))
 
-        lbl2 = btn_font.render("Player Name:", True, WHITE)
-        screen.blit(lbl2, (cx - 180, h // 2 - 30))
-        field_rect2 = pygame.Rect(cx - 180, h // 2 - 10, 360, 35)
-        color2 = INPUT_ACTIVE if active_field == 1 else INPUT_BG
-        pygame.draw.rect(screen, color2, field_rect2, border_radius=4)
-        pygame.draw.rect(screen, WHITE, field_rect2, 1, border_radius=4)
-        ime_show_1 = ime_composing if active_field == 1 else ""
-        cursor_1 = "|" if active_field == 1 and cursor_blink < 30 and not ime_show_1 else ""
-        name_text = player_name + ime_show_1 + cursor_1
-        ts2 = btn_font.render(name_text, True, WHITE)
-        screen.blit(ts2, (field_rect2.x + 8, field_rect2.y + 8))
-        # Underline IME composing text
-        if ime_show_1:
-            comp_x = field_rect2.x + 8 + btn_font.size(player_name)[0]
-            comp_w = btn_font.size(ime_show_1)[0]
-            comp_y = field_rect2.y + 30
-            pygame.draw.line(screen, YELLOW, (comp_x, comp_y), (comp_x + comp_w, comp_y), 2)
+        # Online count
+        count_text = btn_font.render(f"\u30aa\u30f3\u30e9\u30a4\u30f3: {online_count}\u4eba / \u5bfe\u5c40\u5f85\u3061: {looking_count}\u4eba", True, (180, 180, 180))
+        screen.blit(count_text, count_text.get_rect(center=(cx, 130)))
 
         # Time control selection
         tc_label = btn_font.render("\u6301\u3061\u6642\u9593:", True, WHITE)
-        screen.blit(tc_label, (cx - 180, h // 2 + 40))
+        screen.blit(tc_label, (cx - 180, 170))
+        mx_h, my_h = pygame.mouse.get_pos()
         for ti, (label, mt, byo) in enumerate(TIME_PRESETS):
             bx = cx - 100 + ti * 120
-            btn_r = pygame.Rect(bx, h // 2 + 60, 110, 32)
+            btn_r = pygame.Rect(bx, 200, 110, 32)
             if ti == time_preset_idx:
                 pygame.draw.rect(screen, MENU_HOVER_BG, btn_r, border_radius=5)
                 pygame.draw.rect(screen, GREEN, btn_r, 2, border_radius=5)
@@ -1322,13 +1481,60 @@ def connection_screen(screen, font, btn_font, nickname="Player"):
             tl = btn_font.render(label, True, WHITE)
             screen.blit(tl, tl.get_rect(center=btn_r.center))
 
-        # Connect button
-        connect_rect = pygame.Rect(cx - 80, h // 2 + 110, 160, 40)
-        mx_h, my_h = pygame.mouse.get_pos()
-        btn_color = GREEN if connect_rect.collidepoint(mx_h, my_h) else (60, 160, 60)
-        pygame.draw.rect(screen, btn_color, connect_rect, border_radius=6)
-        btn_text = font.render("Connect", True, WHITE)
-        screen.blit(btn_text, btn_text.get_rect(center=connect_rect.center))
+        # Request match / Cancel button
+        action_btn_rect = pygame.Rect(cx - 100, 260, 200, 44)
+        if looking:
+            btn_color = RED if action_btn_rect.collidepoint(mx_h, my_h) else (180, 60, 60)
+            pygame.draw.rect(screen, btn_color, action_btn_rect, border_radius=6)
+            btn_text = font.render("\u30ad\u30e3\u30f3\u30bb\u30eb", True, WHITE)
+        else:
+            btn_color = GREEN if action_btn_rect.collidepoint(mx_h, my_h) else (60, 160, 60)
+            pygame.draw.rect(screen, btn_color, action_btn_rect, border_radius=6)
+            btn_text = font.render("\u5bfe\u5c40\u7533\u3057\u8fbc\u307f", True, WHITE)
+        if not lobby.connected:
+            pygame.draw.rect(screen, (80, 80, 80), action_btn_rect, border_radius=6)
+            btn_text = font.render("\u63a5\u7d9a\u4e2d...", True, (150, 150, 150))
+        screen.blit(btn_text, btn_text.get_rect(center=action_btn_rect.center))
+
+        # Waiting indicator
+        if waiting_for and match_sent_info:
+            wait_text = btn_font.render(
+                f"{match_sent_info['to_name']} ({match_sent_info['to_skill']}) \u306e\u5fdc\u7b54\u3092\u5f85\u3063\u3066\u3044\u307e\u3059...",
+                True, YELLOW
+            )
+            screen.blit(wait_text, wait_text.get_rect(center=(cx, 330)))
+
+        # Incoming match request UI
+        if pending_request:
+            req = pending_request
+            # Request info box
+            box_rect = pygame.Rect(cx - 180, 340, 360, 90)
+            pygame.draw.rect(screen, (50, 60, 70), box_rect, border_radius=6)
+            pygame.draw.rect(screen, GREEN, box_rect, 2, border_radius=6)
+
+            req_text = btn_font.render(
+                f"{req['from_name']} ({req['from_skill']}) \u304b\u3089\u5bfe\u5c40\u7533\u3057\u8fbc\u307f",
+                True, WHITE
+            )
+            screen.blit(req_text, req_text.get_rect(center=(cx, 355)))
+
+            time_desc = f"\u6301\u3061\u6642\u9593: {req['main_time']//60}\u5206+{req['byoyomi']}\u79d2"
+            time_text = btn_font.render(time_desc, True, (200, 200, 200))
+            screen.blit(time_text, time_text.get_rect(center=(cx, 375)))
+
+            # Accept button
+            accept_rect = pygame.Rect(cx - 130, 390, 120, 38)
+            ac = GREEN if accept_rect.collidepoint(mx_h, my_h) else (60, 160, 60)
+            pygame.draw.rect(screen, ac, accept_rect, border_radius=6)
+            at = font.render("\u53d7\u3051\u308b", True, WHITE)
+            screen.blit(at, at.get_rect(center=accept_rect.center))
+
+            # Decline button
+            decline_rect = pygame.Rect(cx + 10, 390, 120, 38)
+            dc = RED if decline_rect.collidepoint(mx_h, my_h) else (180, 60, 60)
+            pygame.draw.rect(screen, dc, decline_rect, border_radius=6)
+            dt = font.render("\u65ad\u308b", True, WHITE)
+            screen.blit(dt, dt.get_rect(center=decline_rect.center))
 
         pygame.display.flip()
         clock.tick(30)
@@ -1397,16 +1603,21 @@ def main():
     if auth_result is None:
         pygame.quit()
         sys.exit()
-    auth_nickname, auth_name = auth_result
+    auth_nickname, auth_name, auth_skill = auth_result
 
-    result = connection_screen(screen, font, btn_font, auth_nickname)
-    if result is None:
+    lobby_result = lobby_screen(screen, font, btn_font, server_base_url,
+                                auth_nickname, auth_name, auth_skill)
+    if lobby_result is None:
         pygame.quit()
         sys.exit()
-    server_url, player_name, time_preset_idx = result
+    room_code, main_time_cfg, byoyomi_cfg = lobby_result
+
+    server_url = server_base_url
+    player_name = auth_nickname
+    time_preset_idx = 0  # not used anymore but keep for compatibility
 
     net = NetworkClient()
-    _, main_time_cfg, byoyomi_cfg = TIME_PRESETS[time_preset_idx]
+    net.room_id = room_code
     net.time_control = (main_time_cfg, byoyomi_cfg)
     net.connect(server_url, player_name)
 
