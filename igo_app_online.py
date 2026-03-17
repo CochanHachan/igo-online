@@ -763,8 +763,8 @@ class PromotionScreen:
         for y in range(win_h):
             t = y / max(win_h - 1, 1)
             r = int(255 - 5 * t)
-            g = int(242 - 15 * t)
-            b = int(245 - 10 * t)
+            g = int(225 - 20 * t)
+            b = int(230 - 15 * t)
             pygame.draw.line(overlay, (r, g, b, bg_alpha), (0, y), (win_w, y))
         screen.blit(overlay, (0, 0))
 
