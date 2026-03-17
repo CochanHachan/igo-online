@@ -662,41 +662,26 @@ _FONT_PATHS = [
 ]
 
 
-def _build_petal_surface(size: float, color: tuple, alpha: int) -> pygame.Surface:
-    """Pre-render a realistic 5-petal sakura blossom at *size* px."""
-    diameter = max(4, int(size * 2.2))
-    surf = pygame.Surface((diameter, diameter), pygame.SRCALPHA)
-    cx, cy = diameter // 2, diameter // 2
-    petal_len = size * 0.48
-    petal_w = size * 0.28
-    c = (*color, alpha)
-    c_light = (min(255, color[0] + 30), min(255, color[1] + 20),
-               min(255, color[2] + 20), alpha)
-    for i in range(5):
-        angle = math.radians(i * 72 - 90)
-        px = cx + math.cos(angle) * petal_len
-        py = cy + math.sin(angle) * petal_len
-        perp = angle + math.pi / 2
-        lx = cx + math.cos(perp) * petal_w * 0.35
-        ly = cy + math.sin(perp) * petal_w * 0.35
-        rx = cx - math.cos(perp) * petal_w * 0.35
-        ry = cy - math.sin(perp) * petal_w * 0.35
-        points = [(int(lx), int(ly)), (int(px), int(py)), (int(rx), int(ry))]
-        if len(set(points)) >= 3:
-            pygame.gfxdraw.filled_trigon(surf, *points[0], *points[1], *points[2], c)
-        # outer rounded tip
-        tip_r = max(1, int(petal_w * 0.35))
-        pygame.gfxdraw.filled_circle(surf, int(px), int(py), tip_r, c)
-        # inner highlight
-        mid_x = int((cx + px) / 2 + math.cos(perp) * 0.5)
-        mid_y = int((cy + py) / 2 + math.sin(perp) * 0.5)
-        hl_r = max(1, int(petal_w * 0.18))
-        pygame.gfxdraw.filled_circle(surf, mid_x, mid_y, hl_r, c_light)
-    # center
-    ctr_r = max(1, int(size * 0.1))
-    pygame.gfxdraw.filled_circle(surf, cx, cy, ctr_r,
-                                 (255, 240, 150, alpha))
-    return surf
+def _load_sakura_images() -> list:
+    """Load sakura petal images from assets/ directory.
+
+    Returns a list of pygame.Surface objects with per-pixel alpha.
+    Falls back to an empty list if files are not found.
+    """
+    assets_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets")
+    surfaces: list = []
+    for i in range(4):
+        path = os.path.join(assets_dir, f"sakura_{i}.png")
+        try:
+            surf = pygame.image.load(path).convert_alpha()
+            surfaces.append(surf)
+        except Exception:
+            pass
+    return surfaces
+
+
+# Module-level cache (populated lazily on first use)
+_sakura_base_images: list = []
 
 
 class PromotionScreen:
@@ -914,23 +899,43 @@ class PromotionScreen:
 
 
 class _SakuraPetal:
-    """A realistic 5-petal sakura blossom that floats and sways."""
+    """A sakura blossom that floats and sways, using image-based sprites."""
 
     def __init__(self, win_w: int, win_h: int):
+        global _sakura_base_images
+        if not _sakura_base_images:
+            _sakura_base_images = _load_sakura_images()
         self.win_w = win_w
         self.win_h = win_h
         self.x = random.uniform(-20, win_w + 20)
         self.y = random.uniform(-win_h * 0.3, -10)
-        self.size = random.uniform(14, 32)
-        self.color = random.choice(_SAKURA_COLORS)
+        self.size = random.randint(20, 50)
         self.alpha = random.randint(170, 250)
-        self.fall_speed = random.uniform(30, 90)
+        self.fall_speed = random.uniform(25, 80)
         self.sway_speed = random.uniform(0.5, 2.0)
         self.sway_amp = random.uniform(25, 70)
         self.phase = random.uniform(0, math.pi * 2)
         self.rotation = random.uniform(0, 360)
-        self.rot_speed = random.uniform(20, 100)
-        self._surf = _build_petal_surface(self.size, self.color, self.alpha)
+        self.rot_speed = random.uniform(15, 80)
+        self._surf = self._make_surface()
+
+    def _make_surface(self) -> pygame.Surface:
+        if _sakura_base_images:
+            base = random.choice(_sakura_base_images)
+            ow, oh = base.get_size()
+            scale = self.size / max(ow, oh)
+            nw = max(1, int(ow * scale))
+            nh = max(1, int(oh * scale))
+            scaled = pygame.transform.smoothscale(base, (nw, nh))
+            if self.alpha < 255:
+                scaled.set_alpha(self.alpha)
+            return scaled
+        # Fallback: simple pink circle if images not found
+        surf = pygame.Surface((self.size, self.size), pygame.SRCALPHA)
+        color = random.choice(_SAKURA_COLORS)
+        r = self.size // 2
+        pygame.gfxdraw.filled_circle(surf, r, r, r, (*color, self.alpha))
+        return surf
 
     def update(self, dt: float) -> None:
         self.y += self.fall_speed * dt
