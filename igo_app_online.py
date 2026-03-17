@@ -680,8 +680,8 @@ def _load_sakura_images() -> list:
     return surfaces
 
 
-# Module-level cache (populated lazily on first use)
-_sakura_base_images: list = []
+# Module-level cache (populated lazily on first use; None = not yet loaded)
+_sakura_base_images: list | None = None
 
 
 class PromotionScreen:
@@ -703,7 +703,7 @@ class PromotionScreen:
         promotion.active = False
     """
 
-    PETAL_COUNT = 200
+    PETAL_COUNT = 350
 
     def __init__(self, win_w: int, win_h: int):
         self.win_w = win_w
@@ -858,10 +858,10 @@ class PromotionScreen:
     @staticmethod
     def _render_outlined(font: pygame.font.Font, text: str,
                          alpha: int) -> pygame.Surface:
-        """Render *text* in black with a white glow outline."""
-        fg = (20, 20, 20)          # black
-        outline = (255, 255, 255)  # white glow
-        shadow = (80, 80, 80)      # gray shadow
+        """Render *text* in gold with a dark outline."""
+        fg = (255, 215, 0)         # gold
+        outline = (120, 60, 0)     # dark brown outline
+        shadow = (80, 40, 0)       # brown shadow
         base = font.render(text, True, fg)
         w, h = base.get_size()
         pad = 6
@@ -903,13 +903,13 @@ class _SakuraPetal:
 
     def __init__(self, win_w: int, win_h: int):
         global _sakura_base_images
-        if not _sakura_base_images:
+        if _sakura_base_images is None:
             _sakura_base_images = _load_sakura_images()
         self.win_w = win_w
         self.win_h = win_h
         self.x = random.uniform(-20, win_w + 20)
         self.y = random.uniform(-win_h * 0.3, -10)
-        self.size = random.randint(20, 50)
+        self.size = random.randint(35, 70)
         self.alpha = random.randint(170, 250)
         self.fall_speed = random.uniform(25, 80)
         self.sway_speed = random.uniform(0.5, 2.0)
