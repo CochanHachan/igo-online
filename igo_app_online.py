@@ -948,6 +948,8 @@ class _SakuraPetal:
 
     def draw(self, surface: pygame.Surface) -> None:
         rotated = pygame.transform.rotate(self._surf, self.rotation)
+        if self.alpha < 255:
+            rotated.set_alpha(self.alpha)
         surface.blit(rotated, rotated.get_rect(center=(int(self.x), int(self.y))))
 
 
