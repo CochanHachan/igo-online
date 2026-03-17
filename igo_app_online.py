@@ -641,176 +641,342 @@ def draw_clock_panel(screen, font, small_font, clock_font, clock_name_font,
 
 # --------------- Sakura (Cherry Blossom) Promotion Screen ---------------
 
-SAKURA_COLORS = [
-    (255, 183, 197),  # pink
-    (255, 200, 210),  # light pink
-    (255, 160, 180),  # darker pink
-    (255, 220, 230),  # very light pink
-    (252, 175, 190),  # rose
+_SAKURA_COLORS = [
+    (255, 183, 197),  # sakura pink
+    (255, 200, 215),  # light pink
+    (255, 155, 180),  # deeper pink
+    (255, 220, 235),  # pale pink
+    (252, 170, 195),  # rose pink
+    (248, 140, 170),  # vivid pink
+    (255, 210, 220),  # blush
+]
+
+_FONT_PATHS = [
+    "C:/Windows/Fonts/meiryo.ttc",
+    "C:/Windows/Fonts/YuGothM.ttc",
+    "C:/Windows/Fonts/msgothic.ttc",
+    "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+    "/usr/share/fonts/truetype/fonts-japanese-gothic.ttf",
+    "/usr/share/fonts/truetype/takao-gothic/TakaoPGothic.ttf",
 ]
 
 
-class SakuraPetal:
-    """A single cherry blossom petal that floats and sways."""
+def _build_petal_surface(size: float, color: tuple, alpha: int) -> pygame.Surface:
+    """Pre-render a realistic 5-petal sakura blossom at *size* px."""
+    diameter = max(4, int(size * 2.2))
+    surf = pygame.Surface((diameter, diameter), pygame.SRCALPHA)
+    cx, cy = diameter // 2, diameter // 2
+    petal_len = size * 0.48
+    petal_w = size * 0.28
+    c = (*color, alpha)
+    c_light = (min(255, color[0] + 30), min(255, color[1] + 20),
+               min(255, color[2] + 20), alpha)
+    for i in range(5):
+        angle = math.radians(i * 72 - 90)
+        px = cx + math.cos(angle) * petal_len
+        py = cy + math.sin(angle) * petal_len
+        perp = angle + math.pi / 2
+        lx = cx + math.cos(perp) * petal_w * 0.35
+        ly = cy + math.sin(perp) * petal_w * 0.35
+        rx = cx - math.cos(perp) * petal_w * 0.35
+        ry = cy - math.sin(perp) * petal_w * 0.35
+        points = [(int(lx), int(ly)), (int(px), int(py)), (int(rx), int(ry))]
+        if len(set(points)) >= 3:
+            pygame.gfxdraw.filled_trigon(surf, *points[0], *points[1], *points[2], c)
+        # outer rounded tip
+        tip_r = max(1, int(petal_w * 0.35))
+        pygame.gfxdraw.filled_circle(surf, int(px), int(py), tip_r, c)
+        # inner highlight
+        mid_x = int((cx + px) / 2 + math.cos(perp) * 0.5)
+        mid_y = int((cy + py) / 2 + math.sin(perp) * 0.5)
+        hl_r = max(1, int(petal_w * 0.18))
+        pygame.gfxdraw.filled_circle(surf, mid_x, mid_y, hl_r, c_light)
+    # center
+    ctr_r = max(1, int(size * 0.1))
+    pygame.gfxdraw.filled_circle(surf, cx, cy, ctr_r,
+                                 (255, 240, 150, alpha))
+    return surf
 
-    def __init__(self, win_w, win_h):
+
+class PromotionScreen:
+    """Manages and draws the promotion celebration overlay.
+
+    Usage
+    -----
+    promotion = PromotionScreen(win_w, win_h)
+
+    # When server sends a promotion message:
+    promotion.show("2段")
+
+    # Each frame:
+    promotion.update(dt)
+    promotion.draw(screen)
+
+    # On mouse click:
+    if promotion.active:
+        promotion.active = False
+    """
+
+    PETAL_COUNT = 200
+
+    def __init__(self, win_w: int, win_h: int):
+        self.win_w = win_w
+        self.win_h = win_h
+        self.active = False
+        self.rank = ""
+        self._start_time = 0.0
+        self._petals: list = []
+        self._sparkles: list = []
+        self._big_font = None
+        self._medium_font = None
+        self._small_font = None
+        self._build_fonts(win_w, win_h)
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+
+    def show(self, rank: str) -> None:
+        """Trigger the promotion screen for *rank* (e.g. "2段")."""
+        import time as _t
+        self.rank = rank
+        self.active = True
+        self._start_time = _t.time()
+        self._petals = self._make_petals(self.win_w, self.win_h)
+        self._sparkles = self._make_sparkles(self.win_w, self.win_h)
+
+    def resize(self, win_w: int, win_h: int) -> None:
+        """Call when the window is resized."""
+        self.win_w = win_w
+        self.win_h = win_h
+        if self.active:
+            self._petals = self._make_petals(win_w, win_h)
+            self._sparkles = self._make_sparkles(win_w, win_h)
+        self._build_fonts(win_w, win_h)
+
+    def update(self, dt: float) -> None:
+        """Advance petal and sparkle animation by *dt* seconds."""
+        if not self.active:
+            return
+        for petal in self._petals:
+            petal.update(dt)
+        for sparkle in self._sparkles:
+            sparkle.update(dt)
+
+    def draw(self, screen: pygame.Surface) -> None:
+        """Draw the overlay onto *screen*."""
+        if not self.active:
+            return
+        import time as _t
+        elapsed = _t.time() - self._start_time
+        win_w, win_h = self.win_w, self.win_h
+
+        # Light-pink gradient background
+        overlay = pygame.Surface((win_w, win_h), pygame.SRCALPHA)
+        bg_alpha = min(230, int(230 * min(elapsed / 0.5, 1.0)))
+        for y in range(win_h):
+            t = y / max(win_h - 1, 1)
+            r = int(255 - 15 * t)
+            g = int(228 - 40 * t)
+            b = int(235 - 25 * t)
+            pygame.draw.line(overlay, (r, g, b, bg_alpha), (0, y), (win_w, y))
+        screen.blit(overlay, (0, 0))
+
+        # Sakura petals (behind text)
+        for petal in self._petals:
+            petal.draw(screen)
+
+        # Sparkle particles
+        for sparkle in self._sparkles:
+            sparkle.draw(screen)
+
+        # Text fade-in
+        text_alpha = min(255, int(255 * max(0, (elapsed - 0.3)) / 0.7))
+        if text_alpha <= 0:
+            return
+
+        pulse = 1.0 + 0.04 * math.sin(elapsed * 2.5)
+
+        line1 = f"{self.rank}に昇段しました"
+        line2 = "おめでとうございます！"
+
+        # Glowing text background
+        glow_alpha = min(100, int(100 * max(0, (elapsed - 0.3)) / 0.7))
+        glow_h = int(win_h * 0.28)
+        glow_y = (win_h - glow_h) // 2
+        glow_surf = pygame.Surface((win_w, glow_h), pygame.SRCALPHA)
+        for gy in range(glow_h):
+            gt = abs(gy - glow_h / 2) / (glow_h / 2)
+            ga = int(glow_alpha * (1.0 - gt * gt))
+            pygame.draw.line(glow_surf, (255, 255, 255, ga), (0, gy), (win_w, gy))
+        screen.blit(glow_surf, (0, glow_y))
+
+        surf1 = self._render_outlined(self._big_font, line1, text_alpha)
+        surf2 = self._render_outlined(self._medium_font, line2, text_alpha)
+
+        if abs(pulse - 1.0) > 0.005:
+            surf1 = pygame.transform.smoothscale(
+                surf1, (int(surf1.get_width() * pulse),
+                        int(surf1.get_height() * pulse)))
+            surf2 = pygame.transform.smoothscale(
+                surf2, (int(surf2.get_width() * pulse),
+                        int(surf2.get_height() * pulse)))
+
+        gap = int(win_h * 0.04)
+        total_h = surf1.get_height() + gap + surf2.get_height()
+        y_start = (win_h - total_h) // 2
+        cx = win_w // 2
+        screen.blit(surf1, surf1.get_rect(
+            center=(cx, y_start + surf1.get_height() // 2)))
+        screen.blit(surf2, surf2.get_rect(
+            center=(cx, y_start + surf1.get_height() + gap +
+                    surf2.get_height() // 2)))
+
+        # Hint text
+        hint_alpha = min(180, int(180 * max(0, (elapsed - 1.5)) / 1.0))
+        if hint_alpha > 0:
+            hint = self._small_font.render(
+                "クリックして閉じる", True, (120, 80, 100))
+            hint.set_alpha(hint_alpha)
+            screen.blit(hint, hint.get_rect(
+                center=(cx, win_h - int(win_h * 0.06))))
+
+    # ------------------------------------------------------------------
+    # Private helpers
+    # ------------------------------------------------------------------
+
+    def _build_fonts(self, win_w: int, win_h: int) -> None:
+        big_size = max(28, int(win_h * 0.09))
+        med_size = max(22, int(win_h * 0.065))
+        small_size = max(14, int(win_h * 0.03))
+        big_font = None
+        medium_font = None
+        small_font = None
+        for fp in _FONT_PATHS:
+            try:
+                big_font = pygame.font.Font(fp, big_size)
+                medium_font = pygame.font.Font(fp, med_size)
+                small_font = pygame.font.Font(fp, small_size)
+                break
+            except Exception:
+                continue
+        if big_font is None:
+            _sys = "meiryo,yugothic,msgothic,notosanscjk,sans"
+            big_font = pygame.font.SysFont(_sys, big_size)
+            medium_font = pygame.font.SysFont(_sys, med_size)
+            small_font = pygame.font.SysFont(_sys, small_size)
+        self._big_font = big_font
+        self._medium_font = medium_font
+        self._small_font = small_font
+
+    @staticmethod
+    def _render_outlined(font: pygame.font.Font, text: str,
+                         alpha: int) -> pygame.Surface:
+        """Render *text* in deep crimson-gold with a white glow outline."""
+        fg = (180, 30, 60)         # deep crimson
+        outline = (255, 255, 255)  # white glow
+        shadow = (100, 20, 40)     # dark shadow
+        base = font.render(text, True, fg)
+        w, h = base.get_size()
+        pad = 6
+        result = pygame.Surface((w + pad * 2, h + pad * 2), pygame.SRCALPHA)
+        # shadow
+        sh = font.render(text, True, shadow)
+        result.blit(sh, (pad + 2, pad + 2))
+        # white glow (thicker outline)
+        glow = font.render(text, True, outline)
+        for ox, oy in ((-3, 0), (3, 0), (0, -3), (0, 3),
+                       (-2, -2), (2, -2), (-2, 2), (2, 2),
+                       (-1, -3), (1, -3), (-1, 3), (1, 3),
+                       (-3, -1), (3, -1), (-3, 1), (3, 1)):
+            result.blit(glow, (pad + ox, pad + oy))
+        result.blit(base, (pad, pad))
+        if alpha < 255:
+            result.set_alpha(alpha)
+        return result
+
+    @staticmethod
+    def _make_petals(win_w: int, win_h: int) -> list:
+        petals = []
+        for _ in range(PromotionScreen.PETAL_COUNT):
+            p = _SakuraPetal(win_w, win_h)
+            p.y = random.uniform(-win_h * 0.1, win_h)
+            petals.append(p)
+        return petals
+
+    @staticmethod
+    def _make_sparkles(win_w: int, win_h: int) -> list:
+        sparkles = []
+        for _ in range(40):
+            sparkles.append(_Sparkle(win_w, win_h))
+        return sparkles
+
+
+class _SakuraPetal:
+    """A realistic 5-petal sakura blossom that floats and sways."""
+
+    def __init__(self, win_w: int, win_h: int):
         self.win_w = win_w
         self.win_h = win_h
         self.x = random.uniform(-20, win_w + 20)
         self.y = random.uniform(-win_h * 0.3, -10)
-        self.size = random.uniform(6, 16)
-        self.color = random.choice(SAKURA_COLORS)
-        self.alpha = random.randint(160, 240)
-        self.fall_speed = random.uniform(40, 100)
+        self.size = random.uniform(8, 22)
+        self.color = random.choice(_SAKURA_COLORS)
+        self.alpha = random.randint(170, 250)
+        self.fall_speed = random.uniform(30, 90)
         self.sway_speed = random.uniform(0.5, 2.0)
-        self.sway_amp = random.uniform(20, 60)
+        self.sway_amp = random.uniform(25, 70)
         self.phase = random.uniform(0, math.pi * 2)
         self.rotation = random.uniform(0, 360)
-        self.rot_speed = random.uniform(30, 120)
+        self.rot_speed = random.uniform(20, 100)
+        self._surf = _build_petal_surface(self.size, self.color, self.alpha)
 
-    def update(self, dt):
+    def update(self, dt: float) -> None:
         self.y += self.fall_speed * dt
         self.phase += self.sway_speed * dt
         self.x += math.sin(self.phase) * self.sway_amp * dt
         self.rotation += self.rot_speed * dt
-        if self.y > self.win_h + 20:
-            self.y = random.uniform(-30, -10)
+        if self.y > self.win_h + 30:
+            self.y = random.uniform(-40, -10)
             self.x = random.uniform(-20, self.win_w + 20)
 
-    def draw(self, surface):
-        petal_surf = pygame.Surface((int(self.size * 2), int(self.size)), pygame.SRCALPHA)
-        r = int(self.size * 0.45)
-        cx1 = int(self.size * 0.55)
-        cx2 = int(self.size * 1.45)
-        cy = int(self.size * 0.5)
-        c = (*self.color, self.alpha)
-        if r >= 1:
-            pygame.gfxdraw.filled_ellipse(petal_surf, cx1, cy, r, int(r * 0.6), c)
-            pygame.gfxdraw.filled_ellipse(petal_surf, cx2, cy, r, int(r * 0.6), c)
-        rotated = pygame.transform.rotate(petal_surf, self.rotation)
-        rect = rotated.get_rect(center=(int(self.x), int(self.y)))
-        surface.blit(rotated, rect)
+    def draw(self, surface: pygame.Surface) -> None:
+        rotated = pygame.transform.rotate(self._surf, self.rotation)
+        surface.blit(rotated, rotated.get_rect(center=(int(self.x), int(self.y))))
 
 
-def _create_sakura_petals(win_w, win_h, count=80):
-    """Create a list of sakura petals scattered across the screen."""
-    petals = []
-    for _ in range(count):
-        p = SakuraPetal(win_w, win_h)
-        p.y = random.uniform(-win_h * 0.1, win_h)
-        petals.append(p)
-    return petals
+class _Sparkle:
+    """A twinkling sparkle particle for extra flashiness."""
 
+    def __init__(self, win_w: int, win_h: int):
+        self.win_w = win_w
+        self.win_h = win_h
+        self.x = random.uniform(0, win_w)
+        self.y = random.uniform(0, win_h)
+        self.phase = random.uniform(0, math.pi * 2)
+        self.speed = random.uniform(2.0, 5.0)
+        self.max_r = random.uniform(2, 5)
 
-def draw_promotion_screen(screen, font, petals, new_rank, win_w, win_h, elapsed):
-    """Draw the promotion celebration overlay with sakura blizzard.
+    def update(self, dt: float) -> None:
+        self.phase += self.speed * dt
+        if self.phase > math.pi * 6:
+            self.phase = random.uniform(0, math.pi * 0.5)
+            self.x = random.uniform(0, self.win_w)
+            self.y = random.uniform(0, self.win_h)
 
-    Parameters
-    ----------
-    screen : pygame.Surface
-    font : pygame.font.Font  (used only for fallback; large fonts created here)
-    petals : list[SakuraPetal]
-    new_rank : str  (e.g. "2段")
-    win_w, win_h : int
-    elapsed : float  (seconds since promotion was triggered, for fade-in)
-    """
-    overlay = pygame.Surface((win_w, win_h), pygame.SRCALPHA)
-
-    # Gradient background: dark purple-pink at top, dark blue at bottom
-    for y in range(win_h):
-        t = y / max(win_h - 1, 1)
-        r = int(40 + 30 * (1 - t))
-        g = int(15 + 10 * (1 - t))
-        b = int(50 + 40 * t)
-        a = min(220, int(220 * min(elapsed / 0.5, 1.0)))
-        pygame.draw.line(overlay, (r, g, b, a), (0, y), (win_w, y))
-
-    screen.blit(overlay, (0, 0))
-
-    # Draw sakura petals
-    for petal in petals:
-        petal.draw(screen)
-
-    # Fade-in factor for text
-    text_alpha = min(255, int(255 * max(0, (elapsed - 0.3)) / 0.7))
-    if text_alpha <= 0:
-        return
-
-    # Scale pulse effect
-    pulse = 1.0 + 0.03 * math.sin(elapsed * 2.0)
-
-    # --- Congratulations text ---
-    line1 = f"{new_rank}に昇段しました"
-    line2 = "おめでとうございます！"
-
-    # Try to create large fonts for the celebration text
-    big_font = None
-    medium_font = None
-    font_paths = [
-        "C:/Windows/Fonts/meiryo.ttc",
-        "C:/Windows/Fonts/YuGothM.ttc",
-        "C:/Windows/Fonts/msgothic.ttc",
-        "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
-        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
-        "/usr/share/fonts/truetype/fonts-japanese-gothic.ttf",
-        "/usr/share/fonts/truetype/takao-gothic/TakaoPGothic.ttf",
-    ]
-    big_size = max(24, int(win_h * 0.08))
-    med_size = max(18, int(win_h * 0.055))
-    for fp in font_paths:
-        try:
-            big_font = pygame.font.Font(fp, big_size)
-            medium_font = pygame.font.Font(fp, med_size)
-            break
-        except Exception:
-            continue
-    if big_font is None:
-        big_font = pygame.font.SysFont("meiryo,yugothic,msgothic,notosanscjk,sans", big_size)
-        medium_font = pygame.font.SysFont("meiryo,yugothic,msgothic,notosanscjk,sans", med_size)
-
-    # Render text with gold color and dark outline for visibility
-    gold = (255, 215, 0)
-    outline_color = (60, 20, 0)
-
-    def render_outlined(f, text, color, outline):
-        """Render text with a dark outline for readability."""
-        base = f.render(text, True, color)
-        w, h = base.get_size()
-        result = pygame.Surface((w + 4, h + 4), pygame.SRCALPHA)
-        offsets = [(-2, 0), (2, 0), (0, -2), (0, 2),
-                   (-1, -1), (1, -1), (-1, 1), (1, 1)]
-        outline_surf = f.render(text, True, outline)
-        for ox, oy in offsets:
-            result.blit(outline_surf, (2 + ox, 2 + oy))
-        result.blit(base, (2, 2))
-        if text_alpha < 255:
-            result.set_alpha(text_alpha)
-        return result
-
-    surf1 = render_outlined(big_font, line1, gold, outline_color)
-    surf2 = render_outlined(medium_font, line2, gold, outline_color)
-
-    # Apply pulse scaling
-    if abs(pulse - 1.0) > 0.005:
-        surf1 = pygame.transform.smoothscale(
-            surf1, (int(surf1.get_width() * pulse), int(surf1.get_height() * pulse)))
-        surf2 = pygame.transform.smoothscale(
-            surf2, (int(surf2.get_width() * pulse), int(surf2.get_height() * pulse)))
-
-    gap = int(win_h * 0.03)
-    total_h = surf1.get_height() + gap + surf2.get_height()
-    y_start = (win_h - total_h) // 2
-
-    screen.blit(surf1, surf1.get_rect(center=(win_w // 2, y_start + surf1.get_height() // 2)))
-    screen.blit(surf2, surf2.get_rect(center=(win_w // 2, y_start + surf1.get_height() + gap + surf2.get_height() // 2)))
-
-    # Hint text at bottom
-    hint_alpha = min(180, int(180 * max(0, (elapsed - 1.5)) / 1.0))
-    if hint_alpha > 0:
-        hint_font = medium_font
-        hint = hint_font.render("クリックして閉じる", True, (220, 220, 220))
-        hint.set_alpha(hint_alpha)
-        screen.blit(hint, hint.get_rect(center=(win_w // 2, win_h - int(win_h * 0.08))))
+    def draw(self, surface: pygame.Surface) -> None:
+        brightness = max(0, math.sin(self.phase))
+        if brightness < 0.1:
+            return
+        r = max(1, int(self.max_r * brightness))
+        a = int(220 * brightness)
+        c = (255, 255, 230, a)
+        pygame.gfxdraw.filled_circle(surface, int(self.x), int(self.y), r, c)
+        if r > 1:
+            pygame.gfxdraw.filled_circle(
+                surface, int(self.x), int(self.y),
+                max(1, r // 2), (255, 255, 255, min(255, a + 30)))
 
 
 class NetworkClient:
@@ -1598,11 +1764,8 @@ def main():
 
     menu_bar = MenuBar(menu_font, INIT_W)
 
-    # Promotion celebration state
-    promotion_active = False
-    promotion_rank = ""
-    promotion_start_time = 0.0
-    promotion_petals = []
+    # Promotion celebration screen
+    promotion = PromotionScreen(INIT_W, INIT_H)
 
     def make_online_buttons(lay, bf):
         btn_y = lay.win_h - BUTTON_BAR_HEIGHT + 6
@@ -1726,10 +1889,7 @@ def main():
                 status_color = GREEN if winner == my_color else RED
 
             elif msg_type == "promotion":
-                promotion_rank = msg.get("new_rank", "")
-                promotion_active = True
-                promotion_start_time = now
-                promotion_petals = _create_sakura_petals(layout.win_w, layout.win_h)
+                promotion.show(msg.get("new_rank", ""))
 
             elif msg_type == "error":
                 status_msg = msg["message"]
@@ -1801,6 +1961,7 @@ def main():
                 layout = Layout(nw, nh)
                 menu_bar.update_width(nw)
                 buttons = make_online_buttons(layout, btn_font)
+                promotion.resize(nw, nh)
                 if layout.stone_diam != cached_diam:
                     black_stone = create_stone_surface("black", layout.stone_diam)
                     white_stone = create_stone_surface("white", layout.stone_diam)
@@ -1842,8 +2003,8 @@ def main():
                     version_popup = False
 
                 # Dismiss promotion overlay on click
-                if promotion_active:
-                    promotion_active = False
+                if promotion.active:
+                    promotion.active = False
                     continue
 
                 if game_over:
@@ -1949,14 +2110,9 @@ def main():
         menu_bar.draw_dropdown(screen)
 
         # Promotion celebration overlay (drawn on top of everything)
-        if promotion_active:
-            promo_elapsed = now - promotion_start_time
-            dt = clock.get_time() / 1000.0
-            for petal in promotion_petals:
-                petal.update(dt)
-            draw_promotion_screen(screen, font, promotion_petals,
-                                 promotion_rank,
-                                 layout.win_w, layout.win_h, promo_elapsed)
+        if promotion.active:
+            promotion.update(clock.get_time() / 1000.0)
+            promotion.draw(screen)
 
         pygame.display.flip()
         clock.tick(30)
