@@ -772,14 +772,14 @@ class PromotionScreen:
         elapsed = _t.time() - self._start_time
         win_w, win_h = self.win_w, self.win_h
 
-        # Light-pink gradient background
+        # Very light pink gradient background
         overlay = pygame.Surface((win_w, win_h), pygame.SRCALPHA)
         bg_alpha = min(230, int(230 * min(elapsed / 0.5, 1.0)))
         for y in range(win_h):
             t = y / max(win_h - 1, 1)
-            r = int(255 - 15 * t)
-            g = int(228 - 40 * t)
-            b = int(235 - 25 * t)
+            r = int(255 - 5 * t)
+            g = int(242 - 15 * t)
+            b = int(245 - 10 * t)
             pygame.draw.line(overlay, (r, g, b, bg_alpha), (0, y), (win_w, y))
         screen.blit(overlay, (0, 0))
 
@@ -848,7 +848,7 @@ class PromotionScreen:
 
     def _build_fonts(self, win_w: int, win_h: int) -> None:
         big_size = max(28, int(win_h * 0.09))
-        med_size = max(22, int(win_h * 0.065))
+        med_size = max(22, int(win_h * 0.08))
         small_size = max(14, int(win_h * 0.03))
         big_font = None
         medium_font = None
@@ -873,10 +873,10 @@ class PromotionScreen:
     @staticmethod
     def _render_outlined(font: pygame.font.Font, text: str,
                          alpha: int) -> pygame.Surface:
-        """Render *text* in deep crimson-gold with a white glow outline."""
-        fg = (180, 30, 60)         # deep crimson
+        """Render *text* in black with a white glow outline."""
+        fg = (20, 20, 20)          # black
         outline = (255, 255, 255)  # white glow
-        shadow = (100, 20, 40)     # dark shadow
+        shadow = (80, 80, 80)      # gray shadow
         base = font.render(text, True, fg)
         w, h = base.get_size()
         pad = 6
@@ -921,7 +921,7 @@ class _SakuraPetal:
         self.win_h = win_h
         self.x = random.uniform(-20, win_w + 20)
         self.y = random.uniform(-win_h * 0.3, -10)
-        self.size = random.uniform(8, 22)
+        self.size = random.uniform(14, 32)
         self.color = random.choice(_SAKURA_COLORS)
         self.alpha = random.randint(170, 250)
         self.fall_speed = random.uniform(30, 90)
@@ -1968,6 +1968,10 @@ def main():
                     cached_diam = layout.stone_diam
             elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                 pos = event.pos
+                # Dismiss promotion overlay on click (before any other handling)
+                if promotion.active:
+                    promotion.active = False
+                    continue
                 # Menu bar handling
                 if menu_bar.is_in_menu_area(pos):
                     action = menu_bar.handle_click(pos)
@@ -2001,11 +2005,6 @@ def main():
                 else:
                     menu_bar.open_menu = -1
                     version_popup = False
-
-                # Dismiss promotion overlay on click
-                if promotion.active:
-                    promotion.active = False
-                    continue
 
                 if game_over:
                     continue

@@ -22,7 +22,7 @@ pygame.init()
 rank = sys.argv[1] if len(sys.argv) > 1 else "2段"
 
 WIN_W, WIN_H = 800, 600
-screen = pygame.display.set_mode((WIN_W, WIN_H))
+screen = pygame.display.set_mode((WIN_W, WIN_H), pygame.NOFRAME)
 pygame.display.set_caption(f"昇段デモ: {rank}")
 
 # Import the PromotionScreen class from the main app
