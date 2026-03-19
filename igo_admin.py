@@ -18,6 +18,14 @@ from tkinter import ttk, messagebox
 
 DEFAULT_SERVER = "https://igo-online.onrender.com"
 
+# Grid table colors (Excel-like blue theme)
+HEADER_BG = "#4472C4"
+HEADER_FG = "#FFFFFF"
+ROW_BG_ODD = "#FFFFFF"
+ROW_BG_EVEN = "#D9E2F3"
+GRID_COLOR = "#8EA9DB"
+CELL_FG = "#000000"
+
 
 def fetch_users(server_url):
     """サーバーからユーザー一覧を取得"""
@@ -36,13 +44,105 @@ def fetch_users(server_url):
         raise Exception("サーバーからの応答を解析できません")
 
 
+class GridTable(tk.Frame):
+    """Excel風グリッドライン付きテーブルウィジェット"""
+
+    def __init__(self, parent, columns, col_widths, col_anchors=None):
+        super().__init__(parent)
+        self.columns = columns
+        self.col_widths = col_widths
+        self.col_anchors = col_anchors or ["w"] * len(columns)
+
+        # Canvas + scrollbars
+        self.canvas = tk.Canvas(self, bg="white", highlightthickness=0)
+        self.v_scroll = ttk.Scrollbar(self, orient=tk.VERTICAL,
+                                      command=self.canvas.yview)
+        self.h_scroll = ttk.Scrollbar(self, orient=tk.HORIZONTAL,
+                                      command=self.canvas.xview)
+        self.canvas.configure(yscrollcommand=self.v_scroll.set,
+                              xscrollcommand=self.h_scroll.set)
+
+        self.canvas.grid(row=0, column=0, sticky="nsew")
+        self.v_scroll.grid(row=0, column=1, sticky="ns")
+        self.h_scroll.grid(row=1, column=0, sticky="ew")
+        self.grid_rowconfigure(0, weight=1)
+        self.grid_columnconfigure(0, weight=1)
+
+        # Inner frame
+        self.inner = tk.Frame(self.canvas, bg=GRID_COLOR)
+        self.canvas_window = self.canvas.create_window((0, 0), window=self.inner,
+                                                        anchor="nw")
+        self.inner.bind("<Configure>", self._on_inner_configure)
+        self.canvas.bind("<Configure>", self._on_canvas_configure)
+        self.canvas.bind_all("<MouseWheel>", self._on_mousewheel)
+        self.canvas.bind_all("<Button-4>", self._on_mousewheel_linux)
+        self.canvas.bind_all("<Button-5>", self._on_mousewheel_linux)
+
+        self._draw_header()
+
+    def _on_inner_configure(self, event):
+        self.canvas.configure(scrollregion=self.canvas.bbox("all"))
+
+    def _on_canvas_configure(self, event):
+        total_w = sum(self.col_widths) + len(self.col_widths) + 1
+        width = max(total_w, event.width)
+        self.canvas.itemconfig(self.canvas_window, width=width)
+
+    def _on_mousewheel(self, event):
+        self.canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+
+    def _on_mousewheel_linux(self, event):
+        if event.num == 4:
+            self.canvas.yview_scroll(-1, "units")
+        elif event.num == 5:
+            self.canvas.yview_scroll(1, "units")
+
+    def _draw_header(self):
+        """Draw header row with grid lines."""
+        row_frame = tk.Frame(self.inner, bg=GRID_COLOR)
+        row_frame.pack(fill=tk.X, padx=1, pady=(1, 0))
+
+        for i, (name, width) in enumerate(zip(self.columns, self.col_widths)):
+            px = (0, 1) if i < len(self.columns) - 1 else (0, 0)
+            cell = tk.Label(row_frame, text=name, bg=HEADER_BG, fg=HEADER_FG,
+                            font=("", 10, "bold"), anchor="center", padx=6, pady=5)
+            cell.grid(row=0, column=i, sticky="nsew", padx=px)
+            row_frame.grid_columnconfigure(i, minsize=width, weight=0)
+
+    def clear(self):
+        """Clear all data rows (keep header)."""
+        children = self.inner.winfo_children()
+        for child in children[1:]:
+            child.destroy()
+
+    def add_row(self, values, row_index=0):
+        """Add a data row with grid lines."""
+        bg = ROW_BG_ODD if row_index % 2 == 0 else ROW_BG_EVEN
+
+        row_frame = tk.Frame(self.inner, bg=GRID_COLOR)
+        row_frame.pack(fill=tk.X, padx=1, pady=(1, 0))
+
+        for i, (val, width) in enumerate(zip(values, self.col_widths)):
+            anchor = self.col_anchors[i]
+            px = (0, 1) if i < len(values) - 1 else (0, 0)
+            cell = tk.Label(row_frame, text=str(val), bg=bg, fg=CELL_FG,
+                            font=("", 10), anchor=anchor, padx=6, pady=3)
+            cell.grid(row=0, column=i, sticky="nsew", padx=px)
+            row_frame.grid_columnconfigure(i, minsize=width, weight=0)
+
+    def add_bottom_border(self):
+        """Add bottom border line after last row."""
+        border = tk.Frame(self.inner, bg=GRID_COLOR, height=1)
+        border.pack(fill=tk.X, padx=1)
+
+
 class AdminApp:
     def __init__(self, server_url):
         self.server_url = server_url
         self.root = tk.Tk()
         self.root.title("囲碁オンライン 管理者パネル")
-        self.root.geometry("800x500")
-        self.root.minsize(600, 350)
+        self.root.geometry("850x500")
+        self.root.minsize(650, 350)
 
         self._build_ui()
         self.refresh()
@@ -74,50 +174,16 @@ class AdminApp:
         # Separator
         ttk.Separator(self.root, orient=tk.HORIZONTAL).pack(fill=tk.X, padx=10, pady=5)
 
-        # Table frame
+        # Grid table
         table_frame = tk.Frame(self.root, padx=10, pady=5)
         table_frame.pack(fill=tk.BOTH, expand=True)
 
-        # Configure style with grid lines (row separators)
-        style = ttk.Style()
-        style.configure("Grid.Treeview",
-                        rowheight=28)
-        style.configure("Grid.Treeview.Heading",
-                        font=("", 10, "bold"),
-                        relief="solid",
-                        borderwidth=1)
-        # Use tag-based alternating row colors for visual grid effect
-        self.tree_tags = ("oddrow", "evenrow")
+        columns = ("ID", "氏名", "ニックネーム", "棋力", "レーティング", "登録日時")
+        col_widths = (50, 140, 140, 90, 100, 180)
+        col_anchors = ("center", "w", "w", "center", "center", "w")
 
-        columns = ("id", "name", "nickname", "skill_level", "rating", "created_at")
-        self.tree = ttk.Treeview(table_frame, columns=columns, show="headings",
-                                 selectmode="browse", style="Grid.Treeview")
-
-        self.tree.heading("id", text="ID")
-        self.tree.heading("name", text="氏名")
-        self.tree.heading("nickname", text="ニックネーム")
-        self.tree.heading("skill_level", text="棋力")
-        self.tree.heading("rating", text="レーティング")
-        self.tree.heading("created_at", text="登録日時")
-
-        self.tree.column("id", width=50, anchor=tk.CENTER)
-        self.tree.column("name", width=150)
-        self.tree.column("nickname", width=150)
-        self.tree.column("skill_level", width=100)
-        self.tree.column("rating", width=100, anchor=tk.CENTER)
-        self.tree.column("created_at", width=180)
-
-        # Alternating row colors for grid-like appearance
-        self.tree.tag_configure("oddrow", background="#ffffff")
-        self.tree.tag_configure("evenrow", background="#f0f0f0")
-
-        # Scrollbar
-        scrollbar = ttk.Scrollbar(table_frame, orient=tk.VERTICAL,
-                                  command=self.tree.yview)
-        self.tree.configure(yscrollcommand=scrollbar.set)
-
-        self.tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        self.grid_table = GridTable(table_frame, columns, col_widths, col_anchors)
+        self.grid_table.pack(fill=tk.BOTH, expand=True)
 
         # Status bar
         self.status_var = tk.StringVar(value="読み込み中...")
@@ -129,15 +195,11 @@ class AdminApp:
         """ユーザー一覧をバックグラウンドで再取得して表示"""
         self.status_var.set("読み込み中...（サーバー起動に最大60秒かかる場合があります）")
         self.root.update_idletasks()
-
-        # Clear existing rows
-        for item in self.tree.get_children():
-            self.tree.delete(item)
+        self.grid_table.clear()
 
         def _fetch_in_bg():
             try:
                 users = fetch_users(self.server_url)
-                # Schedule UI update on main thread
                 self.root.after(0, lambda: self._update_table(users))
             except Exception as e:
                 self.root.after(0, lambda: self._show_error(str(e)))
@@ -146,18 +208,17 @@ class AdminApp:
 
     def _update_table(self, users):
         """UIスレッドでテーブルを更新"""
-        for item in self.tree.get_children():
-            self.tree.delete(item)
+        self.grid_table.clear()
         for i, u in enumerate(users):
-            tag = self.tree_tags[i % 2]
-            self.tree.insert("", tk.END, values=(
+            self.grid_table.add_row((
                 u["id"],
                 u["name"],
                 u["nickname"],
                 u.get("skill_level", ""),
                 u.get("rating", 1500),
                 u.get("created_at", ""),
-            ), tags=(tag,))
+            ), row_index=i)
+        self.grid_table.add_bottom_border()
         self.count_label.config(text=f"登録ユーザー数: {len(users)}")
         self.status_var.set(f"取得完了 ({len(users)}件)")
 
