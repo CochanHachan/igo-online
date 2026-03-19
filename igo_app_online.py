@@ -1098,9 +1098,10 @@ def auth_screen(screen, font, btn_font, server_base_url):
                 else:
                     # Skill dropdown click
                     dd_rect = pygame.Rect(cx - 160, base_y + 3 * 70 + 22, 320, 35)
+                    dropdown_handled = False
                     if skill_dropdown_open:
                         # Check if clicked on a dropdown item
-                        item_clicked = False
+                        dropdown_handled = True
                         visible_count = min(len(skill_levels) - skill_dropdown_scroll, 8)
                         for di in range(visible_count):
                             item_rect = pygame.Rect(dd_rect.x + 2, dd_rect.bottom + 2 + di * 28, dd_rect.width - 4, 28)
@@ -1108,35 +1109,33 @@ def auth_screen(screen, font, btn_font, server_base_url):
                                 actual_idx = skill_dropdown_scroll + di
                                 reg_skill_level = skill_levels[actual_idx]
                                 skill_dropdown_open = False
-                                item_clicked = True
                                 break
-                        if not item_clicked:
-                            # Toggle dropdown if clicked on the field itself, or close if clicked elsewhere
-                            if dd_rect.collidepoint(mx, my):
-                                skill_dropdown_open = False
-                            else:
-                                skill_dropdown_open = False
+                        else:
+                            # No item was clicked — close the dropdown
+                            skill_dropdown_open = False
                     else:
                         if dd_rect.collidepoint(mx, my):
                             skill_dropdown_open = True
-                    # Register button
-                    reg_btn_y = base_y + 4 * 70 + 10
-                    reg_btn_rect = pygame.Rect(cx - 80, reg_btn_y, 160, 40)
-                    if reg_btn_rect.collidepoint(mx, my):
-                        skill_dropdown_open = False
-                        do_register()
-                    # Back to login link
-                    back_text_str = "\u30ed\u30b0\u30a4\u30f3\u753b\u9762\u306b\u623b\u308b"
-                    back_w, back_h = btn_font.size(back_text_str)
-                    back_y = reg_btn_y + 55
-                    back_rect = pygame.Rect(cx - back_w // 2, back_y, back_w, back_h)
-                    if back_rect.collidepoint(mx, my):
-                        commit_ime()
-                        skill_dropdown_open = False
-                        mode = "login"
-                        active_field = 0
-                        ime_composing = ""
-                        message = ""
+                            dropdown_handled = True
+                    # Register button and back link (skip if dropdown was just handled)
+                    if not dropdown_handled:
+                        reg_btn_y = base_y + 4 * 70 + 10
+                        reg_btn_rect = pygame.Rect(cx - 80, reg_btn_y, 160, 40)
+                        if reg_btn_rect.collidepoint(mx, my):
+                            skill_dropdown_open = False
+                            do_register()
+                        # Back to login link
+                        back_text_str = "\u30ed\u30b0\u30a4\u30f3\u753b\u9762\u306b\u623b\u308b"
+                        back_w, back_h = btn_font.size(back_text_str)
+                        back_y = reg_btn_y + 55
+                        back_rect = pygame.Rect(cx - back_w // 2, back_y, back_w, back_h)
+                        if back_rect.collidepoint(mx, my):
+                            commit_ime()
+                            skill_dropdown_open = False
+                            mode = "login"
+                            active_field = 0
+                            ime_composing = ""
+                            message = ""
 
         # --- Draw ---
         w, h = screen.get_size()
