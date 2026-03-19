@@ -12,6 +12,7 @@ import sys
 import urllib.request
 import urllib.error
 import json
+import threading
 import tkinter as tk
 from tkinter import ttk, messagebox
 
@@ -110,31 +111,45 @@ class AdminApp:
         status_bar.pack(fill=tk.X, side=tk.BOTTOM)
 
     def refresh(self):
-        """ユーザー一覧を再取得して表示"""
-        self.status_var.set("読み込み中...")
+        """ユーザー一覧をバックグラウンドで再取得して表示"""
+        self.status_var.set("読み込み中...（サーバー起動に最大60秒かかる場合があります）")
         self.root.update_idletasks()
 
         # Clear existing rows
         for item in self.tree.get_children():
             self.tree.delete(item)
 
-        try:
-            users = fetch_users(self.server_url)
-            for u in users:
-                self.tree.insert("", tk.END, values=(
-                    u["id"],
-                    u["name"],
-                    u["nickname"],
-                    u.get("skill_level", ""),
-                    u.get("rating", 1500),
-                    u.get("created_at", ""),
-                ))
-            self.count_label.config(text=f"登録ユーザー数: {len(users)}")
-            self.status_var.set(f"取得完了 ({len(users)}件)")
-        except Exception as e:
-            self.count_label.config(text="")
-            self.status_var.set(f"エラー: {e}")
-            messagebox.showerror("エラー", str(e))
+        def _fetch_in_bg():
+            try:
+                users = fetch_users(self.server_url)
+                # Schedule UI update on main thread
+                self.root.after(0, lambda: self._update_table(users))
+            except Exception as e:
+                self.root.after(0, lambda: self._show_error(str(e)))
+
+        threading.Thread(target=_fetch_in_bg, daemon=True).start()
+
+    def _update_table(self, users):
+        """UIスレッドでテーブルを更新"""
+        for item in self.tree.get_children():
+            self.tree.delete(item)
+        for u in users:
+            self.tree.insert("", tk.END, values=(
+                u["id"],
+                u["name"],
+                u["nickname"],
+                u.get("skill_level", ""),
+                u.get("rating", 1500),
+                u.get("created_at", ""),
+            ))
+        self.count_label.config(text=f"登録ユーザー数: {len(users)}")
+        self.status_var.set(f"取得完了 ({len(users)}件)")
+
+    def _show_error(self, error_msg):
+        """UIスレッドでエラーを表示"""
+        self.count_label.config(text="")
+        self.status_var.set(f"エラー: {error_msg}")
+        messagebox.showerror("エラー", error_msg)
 
     def run(self):
         self.root.mainloop()
