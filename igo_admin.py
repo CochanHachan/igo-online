@@ -78,9 +78,20 @@ class AdminApp:
         table_frame = tk.Frame(self.root, padx=10, pady=5)
         table_frame.pack(fill=tk.BOTH, expand=True)
 
+        # Configure style with grid lines (row separators)
+        style = ttk.Style()
+        style.configure("Grid.Treeview",
+                        rowheight=28)
+        style.configure("Grid.Treeview.Heading",
+                        font=("", 10, "bold"),
+                        relief="solid",
+                        borderwidth=1)
+        # Use tag-based alternating row colors for visual grid effect
+        self.tree_tags = ("oddrow", "evenrow")
+
         columns = ("id", "name", "nickname", "skill_level", "rating", "created_at")
         self.tree = ttk.Treeview(table_frame, columns=columns, show="headings",
-                                 selectmode="browse")
+                                 selectmode="browse", style="Grid.Treeview")
 
         self.tree.heading("id", text="ID")
         self.tree.heading("name", text="氏名")
@@ -95,6 +106,10 @@ class AdminApp:
         self.tree.column("skill_level", width=100)
         self.tree.column("rating", width=100, anchor=tk.CENTER)
         self.tree.column("created_at", width=180)
+
+        # Alternating row colors for grid-like appearance
+        self.tree.tag_configure("oddrow", background="#ffffff")
+        self.tree.tag_configure("evenrow", background="#f0f0f0")
 
         # Scrollbar
         scrollbar = ttk.Scrollbar(table_frame, orient=tk.VERTICAL,
@@ -133,7 +148,8 @@ class AdminApp:
         """UIスレッドでテーブルを更新"""
         for item in self.tree.get_children():
             self.tree.delete(item)
-        for u in users:
+        for i, u in enumerate(users):
+            tag = self.tree_tags[i % 2]
             self.tree.insert("", tk.END, values=(
                 u["id"],
                 u["name"],
@@ -141,7 +157,7 @@ class AdminApp:
                 u.get("skill_level", ""),
                 u.get("rating", 1500),
                 u.get("created_at", ""),
-            ))
+            ), tags=(tag,))
         self.count_label.config(text=f"登録ユーザー数: {len(users)}")
         self.status_var.set(f"取得完了 ({len(users)}件)")
 

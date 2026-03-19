@@ -69,7 +69,8 @@ def init_db():
     """)
     # Migration: add columns if they don't exist
     if DATABASE_URL:
-        for col, defn in [("rating", "INTEGER NOT NULL DEFAULT 1500")]:
+        for col, defn in [("skill_level", "TEXT NOT NULL DEFAULT ''"),
+                          ("rating", "INTEGER NOT NULL DEFAULT 1500")]:
             try:
                 conn.execute(f"ALTER TABLE users ADD COLUMN {col} {defn}")
             except Exception:
@@ -598,7 +599,8 @@ async def lobby_websocket(websocket: WebSocket, nickname: str):
                     await try_match(other)
                 except Exception:
                     pass
-        lobby_users.pop(nickname, None)
+        if lobby_users.get(nickname) is user:
+            lobby_users.pop(nickname, None)
         await broadcast_lobby_status()
 
 

@@ -822,8 +822,7 @@ def _fetch_skill_levels_bg(http_url, result_holder):
             data = json.loads(resp.read().decode("utf-8"))
             fetched = data.get("skill_levels", [])
             if fetched:
-                result_holder.clear()
-                result_holder.extend(fetched)
+                result_holder[:] = fetched
     except Exception:
         pass  # keep default
 
