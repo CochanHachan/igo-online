@@ -22,7 +22,8 @@ class GlossyButton(tk.Canvas):
 
     def __init__(self, master, text="Button", width=180, height=44,
                  base_color=(60, 160, 60), text_color="white",
-                 font=("Yu Gothic UI", 13, "bold"), command=None, **kwargs):
+                 font=("Yu Gothic UI", 13, "bold"), command=None,
+                 focus_border_width=3, **kwargs):
         super().__init__(master, width=width, height=height,
                          highlightthickness=0, borderwidth=0, **kwargs)
         self._text = text
@@ -32,6 +33,7 @@ class GlossyButton(tk.Canvas):
         self._text_color = text_color
         self._font = font
         self._command = command
+        self._focus_border_width = focus_border_width
         self._state = "normal"  # normal, hover, pressed, focused
 
         # Pre-render button images for each state
@@ -120,8 +122,9 @@ class GlossyButton(tk.Canvas):
         draw.rounded_rectangle(body_rect, radius=radius, fill=border_color)
 
         # Inner body with smooth gradient
-        inner = [margin + scale, top + scale, w - margin - scale, bottom - scale]
-        inner_radius = max(1, radius - scale)
+        bw = self._focus_border_width * scale if focus_border else scale
+        inner = [margin + bw, top + bw, w - margin - bw, bottom - bw]
+        inner_radius = max(1, radius - bw)
 
         # Rounded corner mask
         mask = Image.new("L", (w, h), 0)
