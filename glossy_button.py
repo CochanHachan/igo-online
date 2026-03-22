@@ -224,11 +224,11 @@ class GlossyButton(tk.Canvas):
 
     def _on_release(self, event):
         self._state = "focused"
-        if 0 <= event.x <= self._width and 0 <= event.y <= self._height:
+        if 0 <= event.x < self._width and 0 <= event.y < self._height:
             self._draw("focused_hover")
         else:
             self._draw("focused")
-        if self._command and 0 <= event.x <= self._width and 0 <= event.y <= self._height:
+        if self._command and 0 <= event.x < self._width and 0 <= event.y < self._height:
             self._command()
 
     def _on_focus_in(self, event):
