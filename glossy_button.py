@@ -89,7 +89,7 @@ class GlossyButton(tk.Canvas):
 
     def _render_button(self, base, is_pressed=False, focus_border=False):
         """Render a glossy 3D button image using Pillow."""
-        scale = 3
+        scale = 5
         w, h = self._width * scale, self._height * scale
         img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
         draw = ImageDraw.Draw(img)
@@ -110,10 +110,7 @@ class GlossyButton(tk.Canvas):
 
         # Inner body with smooth gradient
         bw = self._focus_border_width * scale if focus_border else scale
-        # Extra bottom inset when focused to keep border visually equal
-        # (the dark gradient bottom blends with the border color)
-        bot_extra = 2 * scale if focus_border else 0
-        inner = [margin + bw, top + bw, w - margin - bw, bottom - bw - bot_extra]
+        inner = [margin + bw, top + bw, w - margin - bw, bottom - bw]
         inner_radius = max(1, radius - bw)
 
         # Rounded corner mask
@@ -134,12 +131,21 @@ class GlossyButton(tk.Canvas):
         body_masked = Image.new("RGBA", (w, h), (0, 0, 0, 0))
         body_masked.paste(body_only, mask=mask)
 
-        # Composite border + body
+        # Composite border fill + gradient body
         border_layer = Image.new("RGBA", (w, h), (0, 0, 0, 0))
         ImageDraw.Draw(border_layer).rounded_rectangle(
             body_rect, radius=radius, fill=border_color)
         img = Image.alpha_composite(img, border_layer)
         img = Image.alpha_composite(img, body_masked)
+
+        # When focused, draw a bright inner-edge line to separate border
+        # from gradient (prevents dark gradient bottom from blending with border)
+        if focus_border:
+            sep = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+            sep_color = self._lighten(border_color, 60) + (180,)
+            ImageDraw.Draw(sep).rounded_rectangle(
+                inner, radius=inner_radius, outline=sep_color, width=scale)
+            img = Image.alpha_composite(img, sep)
 
         # Subtle glossy highlight (soft ellipse, top area)
         if not is_pressed:
