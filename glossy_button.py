@@ -110,7 +110,10 @@ class GlossyButton(tk.Canvas):
 
         # Inner body with smooth gradient
         bw = self._focus_border_width * scale if focus_border else scale
-        inner = [margin + bw, top + bw, w - margin - bw, bottom - bw]
+        # Extra bottom inset when focused to keep border visually equal
+        # (the dark gradient bottom blends with the border color)
+        bot_extra = 2 * scale if focus_border else 0
+        inner = [margin + bw, top + bw, w - margin - bw, bottom - bw - bot_extra]
         inner_radius = max(1, radius - bw)
 
         # Rounded corner mask
