@@ -224,7 +224,12 @@ class GlossyButton(tk.Canvas):
         if self._state == "pressed":
             return
         self._state = "focused"
-        self._draw("focused")
+        mx = self.winfo_pointerx() - self.winfo_rootx()
+        my = self.winfo_pointery() - self.winfo_rooty()
+        if 0 <= mx < self._width and 0 <= my < self._height:
+            self._draw("focused_hover")
+        else:
+            self._draw("focused")
 
     def _on_focus_out(self, event):
         mx = self.winfo_pointerx() - self.winfo_rootx()
