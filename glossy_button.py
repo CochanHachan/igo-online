@@ -76,7 +76,7 @@ class GlossyButton(tk.Canvas):
         t = max(0.0, min(1.0, t))
         return t * t * (3.0 - 2.0 * t)
 
-    def _calc_gradient(self, base, t, is_pressed, focus_border=False):
+    def _calc_gradient(self, base, t, is_pressed, bot_override=None):
         """Calculate gradient color at position t (0..1) with smooth transitions."""
         if is_pressed:
             top_color = self._darken(base, 25)
@@ -84,9 +84,7 @@ class GlossyButton(tk.Canvas):
             return self._blend(top_color, bot_color, self._smooth(t))
         else:
             highlight = self._lighten(base, 50)
-            # When focused, use a lighter bottom so it contrasts with the
-            # border color (which is often a similar dark shade).
-            bot_color = self._darken(base, 10) if focus_border else self._darken(base, 30)
+            bot_color = bot_override if bot_override else self._darken(base, 30)
             return self._blend(highlight, bot_color, self._smooth(t))
 
     def _render_button(self, base, is_pressed=False, focus_border=False):
@@ -110,6 +108,11 @@ class GlossyButton(tk.Canvas):
             border_color = self._darken(base, 60)
         draw.rounded_rectangle(body_rect, radius=radius, fill=border_color)
 
+        # When focused, ensure gradient bottom always contrasts with border
+        bot_override = None
+        if focus_border:
+            bot_override = self._lighten(border_color, 30)
+
         # Inner body with smooth gradient
         bw = self._focus_border_width * scale if focus_border else scale
         inner = [margin + bw, top + bw, w - margin - bw, bottom - bw]
@@ -126,7 +129,7 @@ class GlossyButton(tk.Canvas):
         for y_off in range(body_h):
             t = y_off / max(1, body_h - 1)
             yy = inner[1] + y_off
-            r, g, b = self._calc_gradient(base, t, is_pressed, focus_border)
+            r, g, b = self._calc_gradient(base, t, is_pressed, bot_override)
             body_draw.line([(inner[0], yy), (inner[2], yy)],
                            fill=(r, g, b, 255))
 
