@@ -60,43 +60,31 @@ class GlossyButton(tk.Canvas):
     def _darken(self, color, amount=30):
         return tuple(max(0, c - amount) for c in color)
 
-    def _calc_gradient(self, base, t, is_pressed):
-        """Calculate gradient color at position t (0..1)."""
-        if is_pressed:
-            if t < 0.5:
-                tt = t / 0.5
-                r = int(base[0] * 0.75 + tt * base[0] * 0.1)
-                g = int(base[1] * 0.75 + tt * base[1] * 0.1)
-                b = int(base[2] * 0.75 + tt * base[2] * 0.1)
-            else:
-                tt = (t - 0.5) / 0.5
-                r = int(base[0] * 0.85 + tt * base[0] * 0.05)
-                g = int(base[1] * 0.85 + tt * base[1] * 0.05)
-                b = int(base[2] * 0.85 + tt * base[2] * 0.05)
-        else:
-            if t < 0.1:
-                tt = t / 0.1
-                r = min(255, int(base[0] + (255 - base[0]) * 0.5 * (1 - tt)))
-                g = min(255, int(base[1] + (255 - base[1]) * 0.5 * (1 - tt)))
-                b = min(255, int(base[2] + (255 - base[2]) * 0.5 * (1 - tt)))
-            elif t < 0.45:
-                tt = (t - 0.1) / 0.35
-                r = min(255, int(base[0] * 1.2 - tt * base[0] * 0.2))
-                g = min(255, int(base[1] * 1.2 - tt * base[1] * 0.2))
-                b = min(255, int(base[2] * 1.2 - tt * base[2] * 0.2))
-            elif t < 0.55:
-                tt = (t - 0.45) / 0.1
-                r = int(base[0] * (1.0 - tt * 0.15))
-                g = int(base[1] * (1.0 - tt * 0.15))
-                b = int(base[2] * (1.0 - tt * 0.15))
-            else:
-                tt = (t - 0.55) / 0.45
-                r = int(base[0] * 0.85 - tt * base[0] * 0.1)
-                g = int(base[1] * 0.85 - tt * base[1] * 0.1)
-                b = int(base[2] * 0.85 - tt * base[2] * 0.1)
-        return max(0, min(255, r)), max(0, min(255, g)), max(0, min(255, b))
+    def _blend(self, c1, c2, t):
+        """Linearly blend two RGB tuples. t=0 gives c1, t=1 gives c2."""
+        return (
+            int(c1[0] + (c2[0] - c1[0]) * t),
+            int(c1[1] + (c2[1] - c1[1]) * t),
+            int(c1[2] + (c2[2] - c1[2]) * t),
+        )
 
-    def _render_button(self, base, is_pressed=False, focus_glow=False):
+    def _smooth(self, t):
+        """Smoothstep interpolation for natural transitions."""
+        t = max(0.0, min(1.0, t))
+        return t * t * (3.0 - 2.0 * t)
+
+    def _calc_gradient(self, base, t, is_pressed):
+        """Calculate gradient color at position t (0..1) with smooth transitions."""
+        if is_pressed:
+            top_color = self._darken(base, 25)
+            bot_color = self._darken(base, 10)
+            return self._blend(top_color, bot_color, self._smooth(t))
+        else:
+            highlight = self._lighten(base, 50)
+            bot_color = self._darken(base, 30)
+            return self._blend(highlight, bot_color, self._smooth(t))
+
+    def _render_button(self, base, is_pressed=False, focus_border=False):
         """Render a glossy 3D button image using Pillow."""
         scale = 3
         w, h = self._width * scale, self._height * scale
@@ -112,23 +100,10 @@ class GlossyButton(tk.Canvas):
             shadow_draw.rounded_rectangle(
                 [2 * scale, shadow_offset + 1 * scale,
                  w - 2 * scale, h - 1 * scale],
-                radius=radius, fill=(0, 0, 0, 80)
+                radius=radius, fill=(0, 0, 0, 70)
             )
             shadow_img = shadow_img.filter(ImageFilter.GaussianBlur(radius=2 * scale))
             img = Image.alpha_composite(img, shadow_img)
-            draw = ImageDraw.Draw(img)
-
-        # Focus glow ring
-        if focus_glow:
-            glow_img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
-            glow_draw = ImageDraw.Draw(glow_img)
-            glow_draw.rounded_rectangle(
-                [0, 0, w - 1, h - 1],
-                radius=radius + 2 * scale,
-                fill=(100, 180, 255, 100)
-            )
-            glow_img = glow_img.filter(ImageFilter.GaussianBlur(radius=3 * scale))
-            img = Image.alpha_composite(img, glow_img)
             draw = ImageDraw.Draw(img)
 
         # Button body
@@ -137,21 +112,16 @@ class GlossyButton(tk.Canvas):
         bottom = h - margin - (2 * scale if not is_pressed else 1 * scale)
         body_rect = [margin, top, w - margin, bottom]
 
-        # Outer border (dark)
-        border_color = self._darken(base, 60)
+        # Outer border (changes color on focus)
+        if focus_border:
+            border_color = (80, 140, 220)
+        else:
+            border_color = self._darken(base, 60)
         draw.rounded_rectangle(body_rect, radius=radius, fill=border_color)
 
-        # Inner body with gradient
+        # Inner body with smooth gradient
         inner = [margin + scale, top + scale, w - margin - scale, bottom - scale]
         inner_radius = max(1, radius - scale)
-
-        # Draw gradient fill
-        body_h = inner[3] - inner[1]
-        for y_off in range(body_h):
-            t = y_off / max(1, body_h - 1)
-            yy = inner[1] + y_off
-            r, g, b = self._calc_gradient(base, t, is_pressed)
-            draw.line([(inner[0], yy), (inner[2], yy)], fill=(r, g, b))
 
         # Rounded corner mask
         mask = Image.new("L", (w, h), 0)
@@ -160,40 +130,42 @@ class GlossyButton(tk.Canvas):
         # Create body with gradient and apply mask
         body_only = Image.new("RGBA", (w, h), (0, 0, 0, 0))
         body_draw = ImageDraw.Draw(body_only)
+        body_h = inner[3] - inner[1]
         for y_off in range(body_h):
             t = y_off / max(1, body_h - 1)
             yy = inner[1] + y_off
             r, g, b = self._calc_gradient(base, t, is_pressed)
-            body_draw.line([(inner[0], yy), (inner[2], yy)], fill=(r, g, b, 255))
+            body_draw.line([(inner[0], yy), (inner[2], yy)],
+                           fill=(r, g, b, 255))
 
         body_masked = Image.new("RGBA", (w, h), (0, 0, 0, 0))
         body_masked.paste(body_only, mask=mask)
 
-        # Composite layers
+        # Composite border + body
         border_layer = Image.new("RGBA", (w, h), (0, 0, 0, 0))
         ImageDraw.Draw(border_layer).rounded_rectangle(
             body_rect, radius=radius, fill=border_color)
         img = Image.alpha_composite(img, border_layer)
         img = Image.alpha_composite(img, body_masked)
 
-        # Glossy highlight overlay (elliptical, top area)
+        # Subtle glossy highlight (soft ellipse, top area)
         if not is_pressed:
             gloss = Image.new("RGBA", (w, h), (0, 0, 0, 0))
             gloss_h = body_h // 3
             ImageDraw.Draw(gloss).ellipse(
-                [inner[0] + 2 * scale, inner[1],
-                 inner[2] - 2 * scale, inner[1] + gloss_h],
-                fill=(255, 255, 255, 55)
+                [inner[0] + 4 * scale, inner[1],
+                 inner[2] - 4 * scale, inner[1] + gloss_h],
+                fill=(255, 255, 255, 35)
             )
-            gloss = gloss.filter(ImageFilter.GaussianBlur(radius=scale))
+            gloss = gloss.filter(ImageFilter.GaussianBlur(radius=2 * scale))
             img = Image.alpha_composite(img, gloss)
 
-        # Top edge highlight
+        # Thin top edge highlight
         hl = Image.new("RGBA", (w, h), (0, 0, 0, 0))
         ImageDraw.Draw(hl).rounded_rectangle(
-            [inner[0] + scale, inner[1], inner[2] - scale, inner[1] + 2 * scale],
+            [inner[0] + scale, inner[1], inner[2] - scale, inner[1] + scale],
             radius=max(1, inner_radius // 2),
-            fill=(255, 255, 255, 70 if not is_pressed else 30)
+            fill=(255, 255, 255, 50 if not is_pressed else 20)
         )
         img = Image.alpha_composite(img, hl)
 
@@ -202,16 +174,16 @@ class GlossyButton(tk.Canvas):
     def _build_images(self):
         """Pre-render all button state images."""
         base = self._base_color
-        hover = self._lighten(base, 25)
+        hover = self._lighten(base, 20)
         pressed = self._darken(base, 20)
         self._images["normal"] = ImageTk.PhotoImage(self._render_button(base))
         self._images["hover"] = ImageTk.PhotoImage(self._render_button(hover))
         self._images["pressed"] = ImageTk.PhotoImage(
             self._render_button(pressed, is_pressed=True))
         self._images["focused"] = ImageTk.PhotoImage(
-            self._render_button(base, focus_glow=True))
+            self._render_button(base, focus_border=True))
         self._images["focused_hover"] = ImageTk.PhotoImage(
-            self._render_button(hover, focus_glow=True))
+            self._render_button(hover, focus_border=True))
 
     def _draw(self, state):
         self.delete("all")
