@@ -232,16 +232,19 @@ class GlossyButton(tk.Canvas):
             self._draw("normal")
 
     def _on_press(self, event):
-        self._draw("pressed")
+        self._state = "pressed"
         self.focus_set()
+        self._draw("pressed")
 
     def _on_release(self, event):
         self._state = "focused"
         self._draw("focused_hover")
-        if self._command:
+        if self._command and 0 <= event.x <= self._width and 0 <= event.y <= self._height:
             self._command()
 
     def _on_focus_in(self, event):
+        if self._state == "pressed":
+            return
         self._state = "focused"
         self._draw("focused")
 
