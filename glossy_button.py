@@ -76,7 +76,7 @@ class GlossyButton(tk.Canvas):
         t = max(0.0, min(1.0, t))
         return t * t * (3.0 - 2.0 * t)
 
-    def _calc_gradient(self, base, t, is_pressed):
+    def _calc_gradient(self, base, t, is_pressed, focus_border=False):
         """Calculate gradient color at position t (0..1) with smooth transitions."""
         if is_pressed:
             top_color = self._darken(base, 25)
@@ -84,7 +84,9 @@ class GlossyButton(tk.Canvas):
             return self._blend(top_color, bot_color, self._smooth(t))
         else:
             highlight = self._lighten(base, 50)
-            bot_color = self._darken(base, 30)
+            # When focused, use a lighter bottom so it contrasts with the
+            # border color (which is often a similar dark shade).
+            bot_color = self._darken(base, 10) if focus_border else self._darken(base, 30)
             return self._blend(highlight, bot_color, self._smooth(t))
 
     def _render_button(self, base, is_pressed=False, focus_border=False):
@@ -124,7 +126,7 @@ class GlossyButton(tk.Canvas):
         for y_off in range(body_h):
             t = y_off / max(1, body_h - 1)
             yy = inner[1] + y_off
-            r, g, b = self._calc_gradient(base, t, is_pressed)
+            r, g, b = self._calc_gradient(base, t, is_pressed, focus_border)
             body_draw.line([(inner[0], yy), (inner[2], yy)],
                            fill=(r, g, b, 255))
 
@@ -137,15 +139,6 @@ class GlossyButton(tk.Canvas):
             body_rect, radius=radius, fill=border_color)
         img = Image.alpha_composite(img, border_layer)
         img = Image.alpha_composite(img, body_masked)
-
-        # When focused, draw a bright inner-edge line to separate border
-        # from gradient (prevents dark gradient bottom from blending with border)
-        if focus_border:
-            sep = Image.new("RGBA", (w, h), (0, 0, 0, 0))
-            sep_color = self._lighten(border_color, 60) + (180,)
-            ImageDraw.Draw(sep).rounded_rectangle(
-                inner, radius=inner_radius, outline=sep_color, width=scale)
-            img = Image.alpha_composite(img, sep)
 
         # Subtle glossy highlight (soft ellipse, top area)
         if not is_pressed:
