@@ -98,7 +98,7 @@ class GlossyButton(tk.Canvas):
         # Button body
         margin = 2 * scale
         top = margin if not is_pressed else margin + 1 * scale
-        bottom = h - margin - (1 * scale if not is_pressed else 0)
+        bottom = h - margin if not is_pressed else h - margin + 1 * scale
         body_rect = [margin, top, w - margin, bottom]
 
         # Outer border (changes color on focus)
