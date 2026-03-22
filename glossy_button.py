@@ -237,8 +237,14 @@ class GlossyButton(tk.Canvas):
         self._draw("focused")
 
     def _on_focus_out(self, event):
-        self._state = "normal"
-        self._draw("normal")
+        mx = self.winfo_pointerx() - self.winfo_rootx()
+        my = self.winfo_pointery() - self.winfo_rooty()
+        if 0 <= mx < self._width and 0 <= my < self._height:
+            self._state = "hover"
+            self._draw("hover")
+        else:
+            self._state = "normal"
+            self._draw("normal")
 
     def _on_key_activate(self, event):
         """Activate button via Enter or Space key."""
