@@ -95,24 +95,10 @@ class GlossyButton(tk.Canvas):
         draw = ImageDraw.Draw(img)
         radius = 8 * scale
 
-        # Shadow (below button, offset)
-        if not is_pressed:
-            shadow_img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
-            shadow_draw = ImageDraw.Draw(shadow_img)
-            shadow_offset = 2 * scale
-            shadow_draw.rounded_rectangle(
-                [2 * scale, shadow_offset + 1 * scale,
-                 w - 2 * scale, h - 1 * scale],
-                radius=radius, fill=(0, 0, 0, 70)
-            )
-            shadow_img = shadow_img.filter(ImageFilter.GaussianBlur(radius=2 * scale))
-            img = Image.alpha_composite(img, shadow_img)
-            draw = ImageDraw.Draw(img)
-
         # Button body
         margin = 2 * scale
         top = margin if not is_pressed else margin + 1 * scale
-        bottom = h - margin - (2 * scale if not is_pressed else 1 * scale)
+        bottom = h - margin - (1 * scale if not is_pressed else 0)
         body_rect = [margin, top, w - margin, bottom]
 
         # Outer border (changes color on focus)
