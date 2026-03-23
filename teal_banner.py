@@ -214,9 +214,7 @@ class TealBanner(tk.Canvas):
 
         img = Image.fromarray(pixels, "RGBA")
 
-        draw = ImageDraw.Draw(img)
-
-        # --- Decorative lines (optional) ---
+        # --- Decorative lines (optional, drawn on separate layer for alpha) ---
         if self._line_color is not None:
             line_alpha = 130
             line_fill = (*self._line_color, line_alpha)
@@ -226,10 +224,13 @@ class TealBanner(tk.Canvas):
             line_x_start = max(4 * scale, sw // 20)
             line_x_end = sw - max(4 * scale, sw // 20)
             lw = max(1, scale // 2)
-            draw.line([(line_x_start, line_y_top), (line_x_end, line_y_top)],
-                      fill=line_fill, width=lw)
-            draw.line([(line_x_start, line_y_bot), (line_x_end, line_y_bot)],
-                      fill=line_fill, width=lw)
+            line_layer = Image.new("RGBA", (sw, sh), (0, 0, 0, 0))
+            line_draw = ImageDraw.Draw(line_layer)
+            line_draw.line([(line_x_start, line_y_top), (line_x_end, line_y_top)],
+                           fill=line_fill, width=lw)
+            line_draw.line([(line_x_start, line_y_bot), (line_x_end, line_y_bot)],
+                           fill=line_fill, width=lw)
+            img = Image.alpha_composite(img, line_layer)
 
         # --- Diamond decorations (optional) ---
         if self._diamond_color is not None:
