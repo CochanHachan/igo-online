@@ -89,7 +89,7 @@ class TealBanner(tk.Canvas):
                  gradient_strength=1.0,
                  corner_radius=None,
                  line_color=(90, 190, 190),
-                 diamond_color=(110, 220, 220),
+                 diamond_color=None,
                  **kwargs):
         super().__init__(master, width=width + 1, height=height + 1,
                          highlightthickness=0, borderwidth=0, **kwargs)
