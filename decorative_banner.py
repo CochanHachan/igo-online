@@ -5,13 +5,14 @@ Gold-bordered navy banner with elegant decorations, suitable for
 notification headers, alerts, and important messages.
 """
 import tkinter as tk
-from PIL import Image, ImageDraw, ImageTk, ImageFilter, ImageFont
+from PIL import Image, ImageDraw, ImageTk, ImageFont
+import numpy as np
 import os
 
 
 class DecorativeBanner(tk.Canvas):
-    """A custom Canvas-based banner with metallic gold border, navy gradient,
-    and decorations.
+    """A custom Canvas-based banner with gold border, navy gradient
+    background with horizontal shading, and decorative accents.
 
     Usage::
 
@@ -20,39 +21,38 @@ class DecorativeBanner(tk.Canvas):
 
         root = tk.Tk()
         banner = DecorativeBanner(root, text="対局の申し込みです！",
-                                  width=380, height=70)
+                                  width=460, height=52)
         banner.pack(pady=20)
         root.mainloop()
     """
 
-    # Font search paths — bold serif preferred, then bold gothic, then regular
+    # Font search paths -- bold gothic preferred (matching reference image)
     _FONT_CANDIDATES = [
-        # Bold serif (closest to reference image)
-        "/usr/share/fonts/opentype/noto/NotoSerifCJK-Bold.ttc",
-        "/usr/share/fonts/opentype/ipafont-mincho/ipam.ttf",
-        # Windows serif / bold
-        "C:/Windows/Fonts/yumindb.ttf",
-        "C:/Windows/Fonts/msmincho.ttc",
-        "C:/Windows/Fonts/yugothb.ttc",
-        "C:/Windows/Fonts/meiryo.ttc",
-        # macOS
-        "/System/Library/Fonts/ヒラギノ明朝 ProN W6.otf",
-        "/System/Library/Fonts/ヒラギノ角ゴシック W6.ttc",
-        # Linux gothic fallback
+        # Bold gothic (closest to reference image)
         "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc",
         "/usr/share/fonts/opentype/ipafont-gothic/ipagp.ttf",
         "/usr/share/fonts/opentype/ipafont-gothic/ipag.ttf",
+        # Windows gothic / bold
+        "C:/Windows/Fonts/yugothb.ttc",
+        "C:/Windows/Fonts/meiryo.ttc",
+        "C:/Windows/Fonts/msgothic.ttc",
+        # macOS
+        "/System/Library/Fonts/ヒラギノ角ゴシック W6.ttc",
+        "/System/Library/Fonts/ヒラギノ角ゴ ProN W6.otf",
+        # Linux serif fallback
+        "/usr/share/fonts/opentype/noto/NotoSerifCJK-Bold.ttc",
+        "/usr/share/fonts/opentype/ipafont-mincho/ipam.ttf",
         "/usr/share/fonts/truetype/fonts-japanese-gothic.ttf",
         "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
     ]
 
-    def __init__(self, master, text="Banner", width=380, height=70,
-                 font=None, font_size=None, text_color=(240, 215, 140),
-                 text_stroke_color=(30, 20, 10),
-                 border_color_light=(230, 200, 120),
-                 border_color_dark=(120, 85, 30),
-                 bg_top=(30, 35, 65), bg_bottom=(45, 55, 95),
-                 line_color=(180, 155, 90), diamond_color=(210, 185, 110),
+    def __init__(self, master, text="Banner", width=460, height=52,
+                 font=None, font_size=None, text_color=(235, 210, 140),
+                 text_stroke_color=(20, 15, 5),
+                 border_color_top=(220, 195, 150),
+                 border_color_bottom=(140, 110, 55),
+                 bg_edge=(35, 40, 65), bg_center=(60, 75, 115),
+                 line_color=(160, 140, 90), diamond_color=(190, 165, 100),
                  **kwargs):
         super().__init__(master, width=width, height=height,
                          highlightthickness=0, borderwidth=0, **kwargs)
@@ -63,10 +63,10 @@ class DecorativeBanner(tk.Canvas):
         self._font_size = font_size
         self._text_color = text_color
         self._text_stroke_color = text_stroke_color
-        self._border_color_light = border_color_light
-        self._border_color_dark = border_color_dark
-        self._bg_top = bg_top
-        self._bg_bottom = bg_bottom
+        self._border_color_top = border_color_top
+        self._border_color_bottom = border_color_bottom
+        self._bg_edge = bg_edge
+        self._bg_center = bg_center
         self._line_color = line_color
         self._diamond_color = diamond_color
 
@@ -91,6 +91,12 @@ class DecorativeBanner(tk.Canvas):
                     continue
         return ImageFont.load_default()
 
+    @staticmethod
+    def _smooth_np(t):
+        """Vectorized smoothstep."""
+        t = np.clip(t, 0.0, 1.0)
+        return t * t * (3.0 - 2.0 * t)
+
     def _smooth(self, t):
         """Smoothstep for natural gradient transitions."""
         t = max(0.0, min(1.0, t))
@@ -108,114 +114,82 @@ class DecorativeBanner(tk.Canvas):
         """Render the banner image and display it on the canvas."""
         scale = 4
         sw, sh = self._width * scale, self._height * scale
-        img = Image.new("RGBA", (sw, sh), (0, 0, 0, 0))
 
-        radius = min(8 * scale, sh // 5)
-        outer_edge = max(2 * scale, sh // 40)  # thin dark outer edge
-        border_w = max(8 * scale, sh // 5)     # thick gold border
+        bw = max(2 * scale, sh // 16)  # border width
 
-        # --- Outer dark edge ---
-        outer_layer = Image.new("RGBA", (sw, sh), (0, 0, 0, 0))
-        ImageDraw.Draw(outer_layer).rounded_rectangle(
-            [0, 0, sw - 1, sh - 1], radius=radius,
-            fill=(35, 25, 10, 255))
-        img = Image.alpha_composite(img, outer_layer)
+        # --- Background with horizontal gradient (using numpy for speed) ---
+        xs = np.arange(sw, dtype=np.float64)
+        ys = np.arange(sh, dtype=np.float64)
+        xx, yy = np.meshgrid(xs, ys)
 
-        # --- Metallic gold border (vertical gradient: dark->light->dark) ---
-        border_rect = [outer_edge, outer_edge,
-                       sw - 1 - outer_edge, sh - 1 - outer_edge]
-        border_radius = max(1, radius - outer_edge)
-        border_layer = Image.new("RGBA", (sw, sh), (0, 0, 0, 0))
-        bd = ImageDraw.Draw(border_layer)
-        for y in range(sh):
-            t = y / max(1, sh - 1)
-            # Symmetric gradient: dark at top/bottom, bright in middle
-            if t < 0.15:
-                mt = t / 0.15 * 0.3
-            elif t < 0.5:
-                mt = 0.3 + (t - 0.15) / 0.35 * 0.7
-            elif t < 0.85:
-                mt = 1.0 - (t - 0.5) / 0.35 * 0.7
-            else:
-                mt = 0.3 - (t - 0.85) / 0.15 * 0.3
-            mt = max(0.0, min(1.0, mt))
-            mt = self._smooth(mt)
-            r, g, b = self._blend(self._border_color_dark,
-                                  self._border_color_light, mt)
-            bd.line([(0, y), (sw, y)], fill=(r, g, b, 255))
+        # Horizontal factor: 0 at edges, 1 at center
+        hx = xx / max(1, sw - 1)
+        h_factor = self._smooth_np(1.0 - np.abs(hx - 0.5) * 2.0)
 
-        border_mask = Image.new("L", (sw, sh), 0)
-        ImageDraw.Draw(border_mask).rounded_rectangle(
-            border_rect, radius=border_radius, fill=255)
-        border_masked = Image.new("RGBA", (sw, sh), (0, 0, 0, 0))
-        border_masked.paste(border_layer, mask=border_mask)
-        img = Image.alpha_composite(img, border_masked)
+        # Subtle vertical factor
+        vy = yy / max(1, sh - 1)
+        v_factor = self._smooth_np(1.0 - np.abs(vy - 0.5) * 2.0) * 0.15
 
-        # --- Bright highlight line near inner edge of gold border ---
-        highlight_m = border_w - scale * 2
-        hl_rect = [highlight_m, highlight_m, sw - highlight_m, sh - highlight_m]
-        hl_r = max(1, radius - highlight_m)
-        hl_layer = Image.new("RGBA", (sw, sh), (0, 0, 0, 0))
-        ImageDraw.Draw(hl_layer).rounded_rectangle(
-            hl_rect, radius=hl_r,
-            outline=(*self._border_color_light, 160), width=max(1, scale))
-        img = Image.alpha_composite(img, hl_layer)
+        t = np.clip(h_factor * 0.85 + v_factor, 0.0, 1.0)
 
-        # --- Inner gradient (dark navy) ---
-        inner = [border_w, border_w, sw - border_w, sh - border_w]
-        inner_r = max(1, radius - border_w)
+        edge = np.array(self._bg_edge, dtype=np.float64)
+        center = np.array(self._bg_center, dtype=np.float64)
 
-        grad = Image.new("RGBA", (sw, sh), (0, 0, 0, 0))
-        gd = ImageDraw.Draw(grad)
-        for y in range(inner[1], inner[3]):
-            t = (y - inner[1]) / max(1, inner[3] - inner[1] - 1)
-            st = self._smooth(t)
-            r, g, b = self._blend(self._bg_top, self._bg_bottom, st)
-            gd.line([(inner[0], y), (inner[2], y)], fill=(r, g, b, 255))
+        pixels = np.zeros((sh, sw, 4), dtype=np.uint8)
+        for ch in range(3):
+            pixels[:, :, ch] = np.clip(
+                edge[ch] + (center[ch] - edge[ch]) * t, 0, 255
+            ).astype(np.uint8)
+        pixels[:, :, 3] = 255
 
-        mask = Image.new("L", (sw, sh), 0)
-        ImageDraw.Draw(mask).rounded_rectangle(inner, radius=inner_r, fill=255)
-        gm = Image.new("RGBA", (sw, sh), (0, 0, 0, 0))
-        gm.paste(grad, mask=mask)
-        img = Image.alpha_composite(img, gm)
+        img = Image.fromarray(pixels, "RGBA")
 
-        # --- Top highlight (subtle glow on navy) ---
-        hl_glow = Image.new("RGBA", (sw, sh), (0, 0, 0, 0))
-        ImageDraw.Draw(hl_glow).ellipse(
-            [sw // 4, inner[1], sw * 3 // 4, inner[1] + (inner[3] - inner[1]) // 2],
-            fill=(120, 140, 200, 18)
-        )
-        hl_glow = hl_glow.filter(ImageFilter.GaussianBlur(radius=4 * scale))
-        hl_glow_masked = Image.new("RGBA", (sw, sh), (0, 0, 0, 0))
-        hl_glow_masked.paste(hl_glow, mask=mask)
-        img = Image.alpha_composite(img, hl_glow_masked)
+        # --- Gold border with vertical gradient (using numpy) ---
+        border_arr = np.zeros((sh, sw, 4), dtype=np.uint8)
 
-        # --- Inner border: dark line at navy edge for depth ---
-        inner_border = Image.new("RGBA", (sw, sh), (0, 0, 0, 0))
-        ImageDraw.Draw(inner_border).rounded_rectangle(
-            inner, radius=inner_r,
-            outline=(10, 10, 25, 220), width=max(1, scale // 2))
-        img = Image.alpha_composite(img, inner_border)
+        y_idx = np.arange(sh)[:, None]
+        x_idx = np.arange(sw)[None, :]
+        in_border = ((y_idx < bw) | (y_idx >= sh - bw) |
+                     (x_idx < bw) | (x_idx >= sw - bw))
 
-        # --- Decorative gold lines (top and bottom, inside navy area) ---
-        line_layer = Image.new("RGBA", (sw, sh), (0, 0, 0, 0))
-        ld = ImageDraw.Draw(line_layer)
-        line_alpha = (*self._line_color, 100)
-        line_inset_x = max(10 * scale, sw // 14)
-        line_inset_y = max(4 * scale, (inner[3] - inner[1]) // 6)
-        ld.line([(inner[0] + line_inset_x, inner[1] + line_inset_y),
-                 (inner[2] - line_inset_x, inner[1] + line_inset_y)],
-                fill=line_alpha, width=scale)
-        ld.line([(inner[0] + line_inset_x, inner[3] - line_inset_y),
-                 (inner[2] - line_inset_x, inner[3] - line_inset_y)],
-                fill=line_alpha, width=scale)
-        img = Image.alpha_composite(img, line_layer)
+        bt = self._smooth_np(y_idx.astype(np.float64) / max(1, sh - 1))
+        top_c = np.array(self._border_color_top, dtype=np.float64)
+        bot_c = np.array(self._border_color_bottom, dtype=np.float64)
 
-        # --- Diamond decorations (left and right) ---
-        ds = max(2 * scale, (inner[3] - inner[1]) // 14)
-        diamond_inset = max(8 * scale, sw // 20)
-        for cx in [inner[0] + diamond_inset, inner[2] - diamond_inset]:
-            cy = sh // 2
+        hx_b = x_idx.astype(np.float64) / max(1, sw - 1)
+        h_bright = self._smooth_np(1.0 - np.abs(hx_b - 0.5) * 2.0) * 0.12
+
+        for ch in range(3):
+            base = top_c[ch] + (bot_c[ch] - top_c[ch]) * bt
+            bright = base + base * h_bright
+            val = np.clip(bright, 0, 255).astype(np.uint8)
+            border_arr[:, :, ch] = np.where(in_border, val, 0)
+        border_arr[:, :, 3] = np.where(in_border, 255, 0).astype(np.uint8)
+
+        border_layer = Image.fromarray(border_arr, "RGBA")
+        img = Image.alpha_composite(img, border_layer)
+
+        draw = ImageDraw.Draw(img)
+
+        # --- Decorative gold lines (top and bottom, inside border) ---
+        line_alpha = 100
+        line_fill = (*self._line_color, line_alpha)
+        line_y_top = bw + max(2 * scale, sh // 12)
+        line_y_bot = sh - bw - max(2 * scale, sh // 12)
+        line_x_start = bw + max(4 * scale, sw // 20)
+        line_x_end = sw - bw - max(4 * scale, sw // 20)
+        line_w = max(1, scale // 2)
+        draw.line([(line_x_start, line_y_top), (line_x_end, line_y_top)],
+                  fill=line_fill, width=line_w)
+        draw.line([(line_x_start, line_y_bot), (line_x_end, line_y_bot)],
+                  fill=line_fill, width=line_w)
+
+        # --- Diamond decorations (left and right of text) ---
+        ds = max(2 * scale, sh // 12)
+        diamond_x_left = bw + max(6 * scale, sw // 18)
+        diamond_x_right = sw - bw - max(6 * scale, sw // 18)
+        cy = sh // 2
+        for cx in [diamond_x_left, diamond_x_right]:
             dl = Image.new("RGBA", (sw, sh), (0, 0, 0, 0))
             ImageDraw.Draw(dl).polygon(
                 [(cx, cy - ds), (cx + ds, cy),
@@ -226,7 +200,7 @@ class DecorativeBanner(tk.Canvas):
 
         # --- Text ---
         auto_font_size = (self._font_size * scale if self._font_size
-                          else max(16, int(self._height * scale * 0.38)))
+                          else max(14, int(self._height * scale * 0.42)))
         pil_font = self._find_font(auto_font_size)
 
         txt = Image.new("RGBA", (sw, sh), (0, 0, 0, 0))
@@ -238,7 +212,7 @@ class DecorativeBanner(tk.Canvas):
 
         # Text shadow (drawn first so it sits behind stroke and main text)
         td.text((tx + scale, ty + scale), self._text, font=pil_font,
-                fill=(0, 0, 0, 100))
+                fill=(0, 0, 0, 90))
 
         # Text stroke (outline) for depth
         stroke_color = (*self._text_stroke_color, 200)
@@ -278,28 +252,24 @@ if __name__ == "__main__":
     root = tk.Tk()
     root.title("DecorativeBanner Demo")
     root.configure(bg="#2c2c2c")
-    root.geometry("620x380")
+    root.geometry("550x350")
 
-    tk.Label(root, text="DecorativeBanner デモ", fg="white", bg="#2c2c2c",
+    tk.Label(root, text="DecorativeBanner Demo", fg="white", bg="#2c2c2c",
              font=("", 14, "bold")).pack(pady=(20, 10))
 
-    # Reference style (wide, close to reference image proportions)
     b1 = DecorativeBanner(root, text="挑戦状が届いています！",
-                          width=550, height=80, bg="#2c2c2c")
+                          width=463, height=52, bg="#2c2c2c")
     b1.pack(pady=8)
 
-    # Default size
     b2 = DecorativeBanner(root, text="対局の申し込みです！",
-                          width=450, height=70, bg="#2c2c2c")
+                          width=400, height=48, bg="#2c2c2c")
     b2.pack(pady=8)
 
-    # Smaller
-    b3 = DecorativeBanner(root, text="あなたの番です", width=350, height=60,
+    b3 = DecorativeBanner(root, text="あなたの番です", width=320, height=44,
                           bg="#2c2c2c")
     b3.pack(pady=8)
 
-    # Compact
-    b4 = DecorativeBanner(root, text="通知", width=200, height=50,
+    b4 = DecorativeBanner(root, text="通知", width=180, height=38,
                           bg="#2c2c2c")
     b4.pack(pady=8)
 
