@@ -84,7 +84,7 @@ class GlossyButton(tk.Canvas):
             return self._blend(top_color, bot_color, self._smooth(t))
         else:
             highlight = self._lighten(base, 50)
-            bot_color = bot_override if bot_override else self._darken(base, 30)
+            bot_color = bot_override if bot_override is not None else self._darken(base, 30)
             return self._blend(highlight, bot_color, self._smooth(t))
 
     def _render_button(self, base, is_pressed=False, focus_border=False):
@@ -103,7 +103,7 @@ class GlossyButton(tk.Canvas):
 
         # Outer border (changes color on focus)
         if focus_border:
-            border_color = self._focus_border_color or (80, 140, 220)
+            border_color = self._focus_border_color if self._focus_border_color is not None else (80, 140, 220)
         else:
             border_color = self._darken(base, 60)
         draw.rounded_rectangle(body_rect, radius=radius, fill=border_color)
