@@ -79,6 +79,7 @@ class LoginScreen(tk.Tk):
             btn_frame, text="\u30ed\u30b0\u30a4\u30f3", width=200, height=48,
             base_color=(50, 150, 50), text_color="white",
             font=("Yu Gothic UI", 14, "bold"),
+            focus_border_color=(40, 120, 40),
             command=self._do_login, bg=bg
         )
         self._login_btn.pack()
