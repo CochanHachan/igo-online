@@ -208,7 +208,7 @@ class DecorativeBanner(tk.Canvas):
             img = Image.alpha_composite(img, dl)
 
         # --- Text ---
-        auto_font_size = (self._font_size if self._font_size
+        auto_font_size = (self._font_size * scale if self._font_size
                           else max(12, self._height * scale // 5))
         pil_font = self._find_font(auto_font_size)
 
