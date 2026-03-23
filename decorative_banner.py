@@ -53,7 +53,9 @@ class DecorativeBanner(tk.Canvas):
                  border_color_bottom=(140, 110, 55),
                  bg_edge=(35, 40, 65), bg_center=(60, 75, 115),
                  line_color=(160, 140, 90), diamond_color=(190, 165, 100),
+                 border_width=None,
                  **kwargs):
+        # Use width+2/height+2 for canvas to prevent right/bottom pixel clipping
         super().__init__(master, width=width, height=height,
                          highlightthickness=0, borderwidth=0, **kwargs)
         self._text = text
@@ -69,6 +71,7 @@ class DecorativeBanner(tk.Canvas):
         self._bg_center = bg_center
         self._line_color = line_color
         self._diamond_color = diamond_color
+        self._border_width = border_width  # None = auto
 
         self._photo = None
         self._render()
@@ -115,22 +118,26 @@ class DecorativeBanner(tk.Canvas):
         scale = 4
         sw, sh = self._width * scale, self._height * scale
 
-        bw = max(2 * scale, sh // 16)  # border width
+        # Border width: user-specified or auto (proportional to height)
+        if self._border_width is not None:
+            bw = self._border_width * scale
+        else:
+            bw = max(3 * scale, sh // 10)  # thicker default for visibility
 
         # --- Background with horizontal gradient (using numpy for speed) ---
         xs = np.arange(sw, dtype=np.float64)
         ys = np.arange(sh, dtype=np.float64)
         xx, yy = np.meshgrid(xs, ys)
 
-        # Horizontal factor: 0 at edges, 1 at center
+        # Horizontal factor: 0 at edges, 1 at center (strong contrast)
         hx = xx / max(1, sw - 1)
         h_factor = self._smooth_np(1.0 - np.abs(hx - 0.5) * 2.0)
 
-        # Subtle vertical factor
+        # Subtle vertical factor (lighter at top)
         vy = yy / max(1, sh - 1)
-        v_factor = self._smooth_np(1.0 - np.abs(vy - 0.5) * 2.0) * 0.15
+        v_factor = (1.0 - vy) * 0.10
 
-        t = np.clip(h_factor * 0.85 + v_factor, 0.0, 1.0)
+        t = np.clip(h_factor + v_factor, 0.0, 1.0)
 
         edge = np.array(self._bg_edge, dtype=np.float64)
         center = np.array(self._bg_center, dtype=np.float64)
@@ -156,8 +163,9 @@ class DecorativeBanner(tk.Canvas):
         top_c = np.array(self._border_color_top, dtype=np.float64)
         bot_c = np.array(self._border_color_bottom, dtype=np.float64)
 
+        # Horizontal brightness variation on border (brighter at center)
         hx_b = x_idx.astype(np.float64) / max(1, sw - 1)
-        h_bright = self._smooth_np(1.0 - np.abs(hx_b - 0.5) * 2.0) * 0.12
+        h_bright = self._smooth_np(1.0 - np.abs(hx_b - 0.5) * 2.0) * 0.18
 
         for ch in range(3):
             base = top_c[ch] + (bot_c[ch] - top_c[ch]) * bt
@@ -171,11 +179,22 @@ class DecorativeBanner(tk.Canvas):
 
         draw = ImageDraw.Draw(img)
 
-        # --- Decorative gold lines (top and bottom, inside border) ---
-        line_alpha = 100
+        # --- Inner edge highlight (thin bright line just inside border) ---
+        inner_line_color = (*self._border_color_top, 80)
+        # Top inner edge
+        draw.line([(bw, bw), (sw - bw - 1, bw)],
+                  fill=inner_line_color, width=max(1, scale // 2))
+        # Bottom inner edge (darker)
+        inner_line_dark = (*self._border_color_bottom, 60)
+        draw.line([(bw, sh - bw - 1), (sw - bw - 1, sh - bw - 1)],
+                  fill=inner_line_dark, width=max(1, scale // 2))
+
+        # --- Decorative gold lines (inside border, near top and bottom) ---
+        line_alpha = 120
         line_fill = (*self._line_color, line_alpha)
-        line_y_top = bw + max(2 * scale, sh // 12)
-        line_y_bot = sh - bw - max(2 * scale, sh // 12)
+        margin_y = max(3 * scale, int(bw * 0.6))
+        line_y_top = bw + margin_y
+        line_y_bot = sh - bw - margin_y
         line_x_start = bw + max(4 * scale, sw // 20)
         line_x_end = sw - bw - max(4 * scale, sw // 20)
         line_w = max(1, scale // 2)
@@ -194,13 +213,13 @@ class DecorativeBanner(tk.Canvas):
             ImageDraw.Draw(dl).polygon(
                 [(cx, cy - ds), (cx + ds, cy),
                  (cx, cy + ds), (cx - ds, cy)],
-                fill=(*self._diamond_color, 180)
+                fill=(*self._diamond_color, 200)
             )
             img = Image.alpha_composite(img, dl)
 
         # --- Text ---
         auto_font_size = (self._font_size * scale if self._font_size
-                          else max(14, int(self._height * scale * 0.42)))
+                          else max(14, int(self._height * scale * 0.38)))
         pil_font = self._find_font(auto_font_size)
 
         txt = Image.new("RGBA", (sw, sh), (0, 0, 0, 0))
@@ -212,10 +231,10 @@ class DecorativeBanner(tk.Canvas):
 
         # Text shadow (drawn first so it sits behind stroke and main text)
         td.text((tx + scale, ty + scale), self._text, font=pil_font,
-                fill=(0, 0, 0, 90))
+                fill=(0, 0, 0, 100))
 
         # Text stroke (outline) for depth
-        stroke_color = (*self._text_stroke_color, 200)
+        stroke_color = (*self._text_stroke_color, 220)
         for dx in (-scale, 0, scale):
             for dy in (-scale, 0, scale):
                 if dx == 0 and dy == 0:
