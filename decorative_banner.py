@@ -266,7 +266,7 @@ class DecorativeBanner(tk.Canvas):
         """Update the banner size and re-render."""
         self._width = width
         self._height = height
-        self.configure(width=width, height=height)
+        self.configure(width=width + 1, height=height + 1)
         self._render()
 
 
