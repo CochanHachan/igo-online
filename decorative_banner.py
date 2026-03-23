@@ -49,14 +49,14 @@ class DecorativeBanner(tk.Canvas):
     def __init__(self, master, text="Banner", width=460, height=52,
                  font=None, font_size=None, text_color=(235, 210, 140),
                  text_stroke_color=(20, 15, 5),
-                 border_color_top=(220, 195, 150),
-                 border_color_bottom=(140, 110, 55),
-                 bg_edge=(35, 40, 65), bg_center=(60, 75, 115),
-                 line_color=(160, 140, 90), diamond_color=(190, 165, 100),
+                 border_color_top=(245, 220, 160),
+                 border_color_bottom=(180, 150, 75),
+                 bg_edge=(30, 35, 60), bg_center=(75, 90, 140),
+                 line_color=(180, 160, 100), diamond_color=(210, 185, 120),
                  border_width=None,
                  **kwargs):
-        # Use width+2/height+2 for canvas to prevent right/bottom pixel clipping
-        super().__init__(master, width=width, height=height,
+        # Canvas 1px wider/taller to prevent right/bottom edge clipping on Windows
+        super().__init__(master, width=width + 1, height=height + 1,
                          highlightthickness=0, borderwidth=0, **kwargs)
         self._text = text
         self._width = width
@@ -125,7 +125,7 @@ class DecorativeBanner(tk.Canvas):
         if self._border_width is not None:
             bw = self._border_width * scale
         else:
-            bw = max(3 * scale, sh // 10)  # thicker default for visibility
+            bw = max(2 * scale, sh // 14)  # thin border matching reference
 
         # --- Background with horizontal gradient (using numpy for speed) ---
         xs = np.arange(sw, dtype=np.float64)
@@ -168,7 +168,7 @@ class DecorativeBanner(tk.Canvas):
 
         # Horizontal brightness variation on border (brighter at center)
         hx_b = x_idx.astype(np.float64) / max(1, sw - 1)
-        h_bright = self._smooth_np(1.0 - np.abs(hx_b - 0.5) * 2.0) * 0.18
+        h_bright = self._smooth_np(1.0 - np.abs(hx_b - 0.5) * 2.0) * 0.22
 
         for ch in range(3):
             base = top_c[ch] + (bot_c[ch] - top_c[ch]) * bt
