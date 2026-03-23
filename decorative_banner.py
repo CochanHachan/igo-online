@@ -10,7 +10,8 @@ import os
 
 
 class DecorativeBanner(tk.Canvas):
-    """A custom Canvas-based banner with gold border, navy gradient, and decorations.
+    """A custom Canvas-based banner with metallic gold border, navy gradient,
+    and decorations.
 
     Usage::
 
@@ -24,29 +25,35 @@ class DecorativeBanner(tk.Canvas):
         root.mainloop()
     """
 
-    # Font search paths (tried in order)
+    # Font search paths — bold serif preferred, then bold gothic, then regular
     _FONT_CANDIDATES = [
-        # Windows
+        # Bold serif (closest to reference image)
+        "/usr/share/fonts/opentype/noto/NotoSerifCJK-Bold.ttc",
+        "/usr/share/fonts/opentype/ipafont-mincho/ipam.ttf",
+        # Windows serif / bold
+        "C:/Windows/Fonts/yumindb.ttf",
+        "C:/Windows/Fonts/msmincho.ttc",
         "C:/Windows/Fonts/yugothb.ttc",
         "C:/Windows/Fonts/meiryo.ttc",
-        "C:/Windows/Fonts/msgothic.ttc",
         # macOS
+        "/System/Library/Fonts/ヒラギノ明朝 ProN W6.otf",
         "/System/Library/Fonts/ヒラギノ角ゴシック W6.ttc",
-        "/Library/Fonts/Yu Gothic Bold.otf",
-        # Linux
+        # Linux gothic fallback
+        "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc",
         "/usr/share/fonts/opentype/ipafont-gothic/ipagp.ttf",
         "/usr/share/fonts/opentype/ipafont-gothic/ipag.ttf",
         "/usr/share/fonts/truetype/fonts-japanese-gothic.ttf",
         "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
-        "/usr/share/fonts/truetype/noto/NotoSansCJK-Bold.ttc",
-        "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc",
     ]
 
     def __init__(self, master, text="Banner", width=380, height=70,
                  font=None, font_size=None, text_color=(240, 215, 140),
-                 border_color=(180, 150, 80), bg_top=(25, 35, 65),
-                 bg_bottom=(40, 55, 90), line_color=(210, 180, 100),
-                 diamond_color=(220, 190, 110), **kwargs):
+                 text_stroke_color=(30, 20, 10),
+                 border_color_light=(230, 200, 120),
+                 border_color_dark=(120, 85, 30),
+                 bg_top=(30, 35, 65), bg_bottom=(45, 55, 95),
+                 line_color=(180, 155, 90), diamond_color=(210, 185, 110),
+                 **kwargs):
         super().__init__(master, width=width, height=height,
                          highlightthickness=0, borderwidth=0, **kwargs)
         self._text = text
@@ -55,7 +62,9 @@ class DecorativeBanner(tk.Canvas):
         self._font_spec = font
         self._font_size = font_size
         self._text_color = text_color
-        self._border_color = border_color
+        self._text_stroke_color = text_stroke_color
+        self._border_color_light = border_color_light
+        self._border_color_dark = border_color_dark
         self._bg_top = bg_top
         self._bg_bottom = bg_bottom
         self._line_color = line_color
@@ -67,7 +76,6 @@ class DecorativeBanner(tk.Canvas):
     def _find_font(self, size):
         """Find an available font, preferring user-specified font."""
         if self._font_spec is not None:
-            # User specified a font family name or path
             if os.path.isfile(self._font_spec):
                 return ImageFont.truetype(self._font_spec, size)
             try:
@@ -98,21 +106,47 @@ class DecorativeBanner(tk.Canvas):
 
     def _render(self):
         """Render the banner image and display it on the canvas."""
-        scale = 3
+        scale = 4
         sw, sh = self._width * scale, self._height * scale
         img = Image.new("RGBA", (sw, sh), (0, 0, 0, 0))
-        draw = ImageDraw.Draw(img)
 
-        radius = min(12 * scale, sh // 3)
+        radius = min(10 * scale, sh // 4)
+        border_w = max(4 * scale, sh // 8)
 
-        # --- Gold border ---
-        draw.rounded_rectangle([0, 0, sw - 1, sh - 1], radius=radius,
-                               fill=self._border_color)
+        # --- Metallic gold border (vertical gradient: dark->light->dark) ---
+        border_layer = Image.new("RGBA", (sw, sh), (0, 0, 0, 0))
+        bd = ImageDraw.Draw(border_layer)
+        for y in range(sh):
+            t = y / max(1, sh - 1)
+            if t < 0.5:
+                mt = t / 0.5
+            else:
+                mt = (1.0 - t) / 0.5
+            mt = self._smooth(mt)
+            r, g, b = self._blend(self._border_color_dark,
+                                  self._border_color_light, mt)
+            bd.line([(0, y), (sw, y)], fill=(r, g, b, 255))
 
-        # --- Inner gradient (navy) ---
-        inner_m = 3 * scale
-        inner = [inner_m, inner_m, sw - inner_m, sh - inner_m]
-        inner_r = max(1, radius - inner_m)
+        outer_mask = Image.new("L", (sw, sh), 0)
+        ImageDraw.Draw(outer_mask).rounded_rectangle(
+            [0, 0, sw - 1, sh - 1], radius=radius, fill=255)
+        border_masked = Image.new("RGBA", (sw, sh), (0, 0, 0, 0))
+        border_masked.paste(border_layer, mask=outer_mask)
+        img = Image.alpha_composite(img, border_masked)
+
+        # --- Thin bright inner edge ---
+        edge_layer = Image.new("RGBA", (sw, sh), (0, 0, 0, 0))
+        edge_m = border_w - scale
+        edge_rect = [edge_m, edge_m, sw - edge_m, sh - edge_m]
+        edge_r = max(1, radius - edge_m)
+        ImageDraw.Draw(edge_layer).rounded_rectangle(
+            edge_rect, radius=edge_r,
+            outline=(*self._border_color_light, 120), width=scale)
+        img = Image.alpha_composite(img, edge_layer)
+
+        # --- Inner gradient (dark navy) ---
+        inner = [border_w, border_w, sw - border_w, sh - border_w]
+        inner_r = max(1, radius - border_w)
 
         grad = Image.new("RGBA", (sw, sh), (0, 0, 0, 0))
         gd = ImageDraw.Draw(grad)
@@ -128,23 +162,30 @@ class DecorativeBanner(tk.Canvas):
         gm.paste(grad, mask=mask)
         img = Image.alpha_composite(img, gm)
 
-        # --- Subtle top highlight ---
+        # --- Top highlight (subtle glow) ---
         hl = Image.new("RGBA", (sw, sh), (0, 0, 0, 0))
         ImageDraw.Draw(hl).ellipse(
-            [sw // 5, inner[1] - sh // 6, sw * 4 // 5, inner[1] + sh // 4],
-            fill=(255, 255, 255, 18)
+            [sw // 5, inner[1] - sh // 8, sw * 4 // 5, inner[1] + sh // 4],
+            fill=(180, 200, 255, 15)
         )
-        hl = hl.filter(ImageFilter.GaussianBlur(radius=2 * scale))
+        hl = hl.filter(ImageFilter.GaussianBlur(radius=3 * scale))
         hl_masked = Image.new("RGBA", (sw, sh), (0, 0, 0, 0))
         hl_masked.paste(hl, mask=mask)
         img = Image.alpha_composite(img, hl_masked)
 
-        # --- Decorative gold lines (top and bottom) ---
+        # --- Inner border: thin dark line around navy area ---
+        inner_border = Image.new("RGBA", (sw, sh), (0, 0, 0, 0))
+        ImageDraw.Draw(inner_border).rounded_rectangle(
+            inner, radius=inner_r,
+            outline=(15, 15, 30, 180), width=scale)
+        img = Image.alpha_composite(img, inner_border)
+
+        # --- Decorative gold lines (top and bottom, inside navy area) ---
         line_layer = Image.new("RGBA", (sw, sh), (0, 0, 0, 0))
         ld = ImageDraw.Draw(line_layer)
-        line_alpha = (*self._line_color, 140)
-        line_inset_x = max(15 * scale, sw // 12)
-        line_inset_y = max(6 * scale, sh // 10)
+        line_alpha = (*self._line_color, 120)
+        line_inset_x = max(15 * scale, sw // 10)
+        line_inset_y = max(5 * scale, (inner[3] - inner[1]) // 7)
         ld.line([(inner[0] + line_inset_x, inner[1] + line_inset_y),
                  (inner[2] - line_inset_x, inner[1] + line_inset_y)],
                 fill=line_alpha, width=scale)
@@ -154,20 +195,21 @@ class DecorativeBanner(tk.Canvas):
         img = Image.alpha_composite(img, line_layer)
 
         # --- Diamond decorations (left and right) ---
-        ds = max(3 * scale, sh // 18)
-        diamond_inset = max(12 * scale, sw // 18)
+        ds = max(3 * scale, (inner[3] - inner[1]) // 12)
+        diamond_inset = max(12 * scale, sw // 16)
         for cx in [inner[0] + diamond_inset, inner[2] - diamond_inset]:
             cy = sh // 2
             dl = Image.new("RGBA", (sw, sh), (0, 0, 0, 0))
             ImageDraw.Draw(dl).polygon(
                 [(cx, cy - ds), (cx + ds, cy),
                  (cx, cy + ds), (cx - ds, cy)],
-                fill=(*self._diamond_color, 200)
+                fill=(*self._diamond_color, 180)
             )
             img = Image.alpha_composite(img, dl)
 
         # --- Text ---
-        auto_font_size = self._font_size if self._font_size else max(10, self._height * scale // 5)
+        auto_font_size = (self._font_size if self._font_size
+                          else max(12, self._height * scale // 5))
         pil_font = self._find_font(auto_font_size)
 
         txt = Image.new("RGBA", (sw, sh), (0, 0, 0, 0))
@@ -177,9 +219,18 @@ class DecorativeBanner(tk.Canvas):
         tx = (sw - tw) // 2
         ty = (sh - th) // 2 - bbox[1]
 
-        # Text shadow
+        # Text stroke (outline) for depth
+        stroke_color = (*self._text_stroke_color, 200)
+        for dx in (-scale, 0, scale):
+            for dy in (-scale, 0, scale):
+                if dx == 0 and dy == 0:
+                    continue
+                td.text((tx + dx, ty + dy), self._text, font=pil_font,
+                        fill=stroke_color)
+
+        # Text shadow (subtle drop)
         td.text((tx + scale, ty + scale), self._text, font=pil_font,
-                fill=(0, 0, 0, 120))
+                fill=(0, 0, 0, 100))
         # Main text
         td.text((tx, ty), self._text, font=pil_font,
                 fill=(*self._text_color, 255))
@@ -209,29 +260,34 @@ if __name__ == "__main__":
     root = tk.Tk()
     root.title("DecorativeBanner Demo")
     root.configure(bg="#2c2c2c")
-    root.geometry("500x400")
+    root.geometry("550x420")
 
     tk.Label(root, text="DecorativeBanner デモ", fg="white", bg="#2c2c2c",
              font=("", 14, "bold")).pack(pady=(20, 10))
 
+    # Reference style
+    b1 = DecorativeBanner(root, text="挑戦状が届いています！",
+                          width=420, height=60, bg="#2c2c2c")
+    b1.pack(pady=8)
+
     # Default size
-    b1 = DecorativeBanner(root, text="対局の申し込みです！",
+    b2 = DecorativeBanner(root, text="対局の申し込みです！",
                           width=380, height=70, bg="#2c2c2c")
-    b1.pack(pady=10)
+    b2.pack(pady=8)
 
     # Smaller
-    b2 = DecorativeBanner(root, text="あなたの番です", width=280, height=50,
+    b3 = DecorativeBanner(root, text="あなたの番です", width=280, height=50,
                           bg="#2c2c2c")
-    b2.pack(pady=10)
+    b3.pack(pady=8)
 
-    # Wider, different text
-    b3 = DecorativeBanner(root, text="対局が終了しました",
-                          width=420, height=60, bg="#2c2c2c")
-    b3.pack(pady=10)
+    # Wider
+    b4 = DecorativeBanner(root, text="対局が終了しました",
+                          width=450, height=55, bg="#2c2c2c")
+    b4.pack(pady=8)
 
     # Compact
-    b4 = DecorativeBanner(root, text="通知", width=150, height=40,
+    b5 = DecorativeBanner(root, text="通知", width=150, height=40,
                           bg="#2c2c2c")
-    b4.pack(pady=10)
+    b5.pack(pady=8)
 
     root.mainloop()
