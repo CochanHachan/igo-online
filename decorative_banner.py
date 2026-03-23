@@ -80,7 +80,10 @@ class DecorativeBanner(tk.Canvas):
         """Find an available font, preferring user-specified font."""
         if self._font_spec is not None:
             if os.path.isfile(self._font_spec):
-                return ImageFont.truetype(self._font_spec, size)
+                try:
+                    return ImageFont.truetype(self._font_spec, size)
+                except (OSError, IOError):
+                    pass
             try:
                 return ImageFont.truetype(self._font_spec, size)
             except (OSError, IOError):
