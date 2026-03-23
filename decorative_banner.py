@@ -182,16 +182,6 @@ class DecorativeBanner(tk.Canvas):
 
         draw = ImageDraw.Draw(img)
 
-        # --- Inner edge highlight (thin bright line just inside border) ---
-        inner_line_color = (*self._border_color_top, 80)
-        # Top inner edge
-        draw.line([(bw, bw), (sw - bw - 1, bw)],
-                  fill=inner_line_color, width=max(1, scale // 2))
-        # Bottom inner edge (darker)
-        inner_line_dark = (*self._border_color_bottom, 60)
-        draw.line([(bw, sh - bw - 1), (sw - bw - 1, sh - bw - 1)],
-                  fill=inner_line_dark, width=max(1, scale // 2))
-
         # --- Decorative gold lines (inside border, near top and bottom) ---
         line_alpha = 120
         line_fill = (*self._line_color, line_alpha)
