@@ -181,35 +181,37 @@ class DecorativeBanner(tk.Canvas):
         img = Image.alpha_composite(img, border_layer)
 
         # --- Decorative gold lines (inside border, near top and bottom) ---
-        line_alpha = 120
-        line_fill = (*self._line_color, line_alpha)
-        margin_y = max(3 * scale, int(bw * 0.6))
-        line_y_top = bw + margin_y
-        line_y_bot = sh - bw - margin_y
-        line_x_start = bw + max(4 * scale, sw // 20)
-        line_x_end = sw - bw - max(4 * scale, sw // 20)
-        line_w = max(1, scale // 2)
-        line_layer = Image.new("RGBA", (sw, sh), (0, 0, 0, 0))
-        line_draw = ImageDraw.Draw(line_layer)
-        line_draw.line([(line_x_start, line_y_top), (line_x_end, line_y_top)],
-                  fill=line_fill, width=line_w)
-        line_draw.line([(line_x_start, line_y_bot), (line_x_end, line_y_bot)],
-                  fill=line_fill, width=line_w)
-        img = Image.alpha_composite(img, line_layer)
+        if self._line_color is not None:
+            line_alpha = 120
+            line_fill = (*self._line_color, line_alpha)
+            margin_y = max(3 * scale, int(bw * 0.6))
+            line_y_top = bw + margin_y
+            line_y_bot = sh - bw - margin_y
+            line_x_start = bw + max(4 * scale, sw // 20)
+            line_x_end = sw - bw - max(4 * scale, sw // 20)
+            line_w = max(1, scale // 2)
+            line_layer = Image.new("RGBA", (sw, sh), (0, 0, 0, 0))
+            line_draw = ImageDraw.Draw(line_layer)
+            line_draw.line([(line_x_start, line_y_top), (line_x_end, line_y_top)],
+                      fill=line_fill, width=line_w)
+            line_draw.line([(line_x_start, line_y_bot), (line_x_end, line_y_bot)],
+                      fill=line_fill, width=line_w)
+            img = Image.alpha_composite(img, line_layer)
 
         # --- Diamond decorations (left and right of text) ---
-        ds = max(2 * scale, sh // 12)
-        diamond_x_left = bw + max(6 * scale, sw // 18)
-        diamond_x_right = sw - bw - max(6 * scale, sw // 18)
-        cy = sh // 2
-        for cx in [diamond_x_left, diamond_x_right]:
-            dl = Image.new("RGBA", (sw, sh), (0, 0, 0, 0))
-            ImageDraw.Draw(dl).polygon(
-                [(cx, cy - ds), (cx + ds, cy),
-                 (cx, cy + ds), (cx - ds, cy)],
-                fill=(*self._diamond_color, 200)
-            )
-            img = Image.alpha_composite(img, dl)
+        if self._diamond_color is not None:
+            ds = max(2 * scale, sh // 12)
+            diamond_x_left = bw + max(6 * scale, sw // 18)
+            diamond_x_right = sw - bw - max(6 * scale, sw // 18)
+            cy = sh // 2
+            for cx in [diamond_x_left, diamond_x_right]:
+                dl = Image.new("RGBA", (sw, sh), (0, 0, 0, 0))
+                ImageDraw.Draw(dl).polygon(
+                    [(cx, cy - ds), (cx + ds, cy),
+                     (cx, cy + ds), (cx - ds, cy)],
+                    fill=(*self._diamond_color, 200)
+                )
+                img = Image.alpha_composite(img, dl)
 
         # --- Text ---
         auto_font_size = (self._font_size * scale if self._font_size
