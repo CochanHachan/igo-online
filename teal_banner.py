@@ -263,16 +263,17 @@ class TealBanner(tk.Canvas):
         td.text((tx + scale, ty + scale), self._text, font=pil_font,
                 fill=(0, 0, 0, 80))
 
-        # Text stroke
-        stroke_color = (*self._text_stroke_color, 200)
-        sw2 = max(1, scale)
-        for dx in range(-sw2, sw2 + 1):
-            for dy in range(-sw2, sw2 + 1):
-                if dx == 0 and dy == 0:
-                    continue
-                if dx * dx + dy * dy <= sw2 * sw2:
-                    td.text((tx + dx, ty + dy), self._text,
-                            font=pil_font, fill=stroke_color)
+        # Text stroke (skip if None)
+        if self._text_stroke_color is not None:
+            stroke_color = (*self._text_stroke_color, 200)
+            sw2 = max(1, scale)
+            for dx in range(-sw2, sw2 + 1):
+                for dy in range(-sw2, sw2 + 1):
+                    if dx == 0 and dy == 0:
+                        continue
+                    if dx * dx + dy * dy <= sw2 * sw2:
+                        td.text((tx + dx, ty + dy), self._text,
+                                font=pil_font, fill=stroke_color)
 
         # Main text
         td.text((tx, ty), self._text, font=pil_font,
