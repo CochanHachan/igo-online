@@ -214,21 +214,30 @@ class TealBanner(tk.Canvas):
 
         img = Image.fromarray(pixels, "RGBA")
 
-        # --- Decorative lines (optional, drawn on separate layer for alpha) ---
+        # --- Decorative frame (optional, drawn on separate layer for alpha) ---
         if self._line_color is not None:
             line_alpha = 130
             line_fill = (*self._line_color, line_alpha)
             margin_y = max(3 * scale, sh // 8)
+            margin_x = max(4 * scale, sw // 20)
             line_y_top = margin_y
             line_y_bot = sh - margin_y
-            line_x_start = max(4 * scale, sw // 20)
-            line_x_end = sw - max(4 * scale, sw // 20)
+            line_x_start = margin_x
+            line_x_end = sw - margin_x
             lw = max(1, scale // 2)
             line_layer = Image.new("RGBA", (sw, sh), (0, 0, 0, 0))
             line_draw = ImageDraw.Draw(line_layer)
+            # Top
             line_draw.line([(line_x_start, line_y_top), (line_x_end, line_y_top)],
                            fill=line_fill, width=lw)
+            # Bottom
             line_draw.line([(line_x_start, line_y_bot), (line_x_end, line_y_bot)],
+                           fill=line_fill, width=lw)
+            # Left
+            line_draw.line([(line_x_start, line_y_top), (line_x_start, line_y_bot)],
+                           fill=line_fill, width=lw)
+            # Right
+            line_draw.line([(line_x_end, line_y_top), (line_x_end, line_y_bot)],
                            fill=line_fill, width=lw)
             img = Image.alpha_composite(img, line_layer)
 
