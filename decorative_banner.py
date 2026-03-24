@@ -230,13 +230,14 @@ class DecorativeBanner(tk.Canvas):
                 fill=(0, 0, 0, 100))
 
         # Text stroke (outline) for depth
-        stroke_color = (*self._text_stroke_color, 220)
-        for dx in (-scale, 0, scale):
-            for dy in (-scale, 0, scale):
-                if dx == 0 and dy == 0:
-                    continue
-                td.text((tx + dx, ty + dy), self._text, font=pil_font,
-                        fill=stroke_color)
+        if self._text_stroke_color is not None:
+            stroke_color = (*self._text_stroke_color, 220)
+            for dx in (-scale, 0, scale):
+                for dy in (-scale, 0, scale):
+                    if dx == 0 and dy == 0:
+                        continue
+                    td.text((tx + dx, ty + dy), self._text, font=pil_font,
+                            fill=stroke_color)
 
         # Main text
         td.text((tx, ty), self._text, font=pil_font,
