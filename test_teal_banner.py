@@ -47,9 +47,13 @@ def main():
     # --- 角の丸み ---
     corner_radius = None     # None=自動, 0=角ばった, 数値=丸みの大きさ
 
-    # --- 装飾ライン ---
-    line_color = (90, 190, 190)        # ラインの色, None=ラインなし
-    diamond_color = (110, 220, 220)    # ダイヤモンドの色, None=ダイヤなし
+    # --- 外枠（バナーの縁） ---
+    border_color = (90, 190, 190)      # 外枠の色, None=外枠なし
+    border_width = None                # 外枠の太さ, None=自動
+
+    # --- 内側の装飾 ---
+    line_color = None                  # 内側ラインの色, None=ラインなし
+    diamond_color = None               # ダイヤモンドの色, None=ダイヤなし
 
     # =================================================================
     # ★ ここまでパラメータ ★
@@ -78,6 +82,8 @@ def main():
         bg_center=bg_center,
         gradient_strength=gradient_strength,
         corner_radius=corner_radius,
+        border_color=border_color,
+        border_width=border_width,
         line_color=line_color,
         diamond_color=diamond_color,
         bg="#2c2c2c",
@@ -96,7 +102,8 @@ def main():
         f"背景端: {bg_edge} / 背景中央: {bg_center}",
         f"グラデーション強さ: {gradient_strength}",
         f"角の丸み: {corner_radius if corner_radius is not None else '自動'}",
-        f"ライン色: {line_color} / ダイヤ色: {diamond_color}",
+        f"外枠色: {border_color} / 外枠太さ: {border_width if border_width is not None else '自動'}",
+        f"内側ライン色: {line_color} / ダイヤ色: {diamond_color}",
     ]
     for p in params:
         tk.Label(info_frame, text=p, fg="#aaaaaa", bg="#2c2c2c",
@@ -122,10 +129,10 @@ def main():
                width=250, height=36,
                corner_radius=0, bg="#2c2c2c").pack(pady=4)
 
-    # 装飾なし
-    TealBanner(root, text="装飾なし",
+    # 外枠なし
+    TealBanner(root, text="外枠なし",
                width=250, height=36,
-               line_color=None, diamond_color=None,
+               border_color=None,
                bg="#2c2c2c").pack(pady=4)
 
     root.mainloop()

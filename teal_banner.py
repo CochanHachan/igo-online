@@ -57,8 +57,12 @@ class TealBanner(tk.Canvas):
     corner_radius : int or None
         Corner radius in pixels. None = auto (proportional to height).
         0 = no rounding.
+    border_color : tuple[int, int, int] or None
+        RGB color for the outer border of the banner. None = no border.
+    border_width : int or None
+        Border width in pixels. None = auto (proportional to height).
     line_color : tuple[int, int, int] or None
-        RGB color for decorative lines. None = no lines.
+        RGB color for interior decorative lines. None = no lines (default).
     diamond_color : tuple[int, int, int] or None
         RGB color for diamond decorations. None = no diamonds.
     """
@@ -88,7 +92,9 @@ class TealBanner(tk.Canvas):
                  bg_center=(50, 110, 130),
                  gradient_strength=1.0,
                  corner_radius=None,
-                 line_color=(90, 190, 190),
+                 border_color=(90, 190, 190),
+                 border_width=None,
+                 line_color=None,
                  diamond_color=None,
                  **kwargs):
         super().__init__(master, width=width + 1, height=height + 1,
@@ -105,6 +111,8 @@ class TealBanner(tk.Canvas):
         self._bg_center = bg_center
         self._gradient_strength = gradient_strength
         self._corner_radius = corner_radius
+        self._border_color = border_color
+        self._border_width = border_width
         self._line_color = line_color
         self._diamond_color = diamond_color
 
@@ -214,7 +222,22 @@ class TealBanner(tk.Canvas):
 
         img = Image.fromarray(pixels, "RGBA")
 
-        # --- Decorative frame (optional, drawn on separate layer for alpha) ---
+        # --- Outer border (drawn along the edge of the banner) ---
+        if self._border_color is not None:
+            if self._border_width is not None:
+                bw = self._border_width * scale
+            else:
+                bw = max(2, scale)  # auto: ~1px after downscale
+            border_layer = Image.new("RGBA", (sw, sh), (0, 0, 0, 0))
+            border_draw = ImageDraw.Draw(border_layer)
+            border_fill = (*self._border_color, 200)
+            # Draw rounded rectangle outline
+            border_draw.rounded_rectangle(
+                [(0, 0), (sw - 1, sh - 1)],
+                radius=cr, outline=border_fill, width=bw)
+            img = Image.alpha_composite(img, border_layer)
+
+        # --- Interior decorative lines (optional) ---
         if self._line_color is not None:
             line_alpha = 130
             line_fill = (*self._line_color, line_alpha)
