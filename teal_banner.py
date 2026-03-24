@@ -224,7 +224,7 @@ class TealBanner(tk.Canvas):
             line_y_bot = sh - margin_y
             line_x_start = margin_x
             line_x_end = sw - margin_x
-            lw = max(1, scale // 2)
+            lw = max(2, scale)
             line_layer = Image.new("RGBA", (sw, sh), (0, 0, 0, 0))
             line_draw = ImageDraw.Draw(line_layer)
             # Top
