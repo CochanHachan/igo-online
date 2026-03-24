@@ -180,8 +180,6 @@ class DecorativeBanner(tk.Canvas):
         border_layer = Image.fromarray(border_arr, "RGBA")
         img = Image.alpha_composite(img, border_layer)
 
-        draw = ImageDraw.Draw(img)
-
         # --- Decorative gold lines (inside border, near top and bottom) ---
         line_alpha = 120
         line_fill = (*self._line_color, line_alpha)
@@ -191,10 +189,13 @@ class DecorativeBanner(tk.Canvas):
         line_x_start = bw + max(4 * scale, sw // 20)
         line_x_end = sw - bw - max(4 * scale, sw // 20)
         line_w = max(1, scale // 2)
-        draw.line([(line_x_start, line_y_top), (line_x_end, line_y_top)],
+        line_layer = Image.new("RGBA", (sw, sh), (0, 0, 0, 0))
+        line_draw = ImageDraw.Draw(line_layer)
+        line_draw.line([(line_x_start, line_y_top), (line_x_end, line_y_top)],
                   fill=line_fill, width=line_w)
-        draw.line([(line_x_start, line_y_bot), (line_x_end, line_y_bot)],
+        line_draw.line([(line_x_start, line_y_bot), (line_x_end, line_y_bot)],
                   fill=line_fill, width=line_w)
+        img = Image.alpha_composite(img, line_layer)
 
         # --- Diamond decorations (left and right of text) ---
         ds = max(2 * scale, sh // 12)
