@@ -23,7 +23,8 @@ class GlossyButton(tk.Canvas):
     def __init__(self, master, text="Button", width=180, height=44,
                  base_color=(60, 160, 60), text_color="white",
                  font=("Yu Gothic UI", 13, "bold"), command=None,
-                 focus_border_width=3, focus_border_color=None, **kwargs):
+                 focus_border_width=3, focus_border_color=None,
+                 depth=1.0, **kwargs):
         super().__init__(master, width=width, height=height,
                          highlightthickness=0, borderwidth=0, **kwargs)
         self._text = text
@@ -35,6 +36,7 @@ class GlossyButton(tk.Canvas):
         self._command = command
         self._focus_border_width = focus_border_width
         self._focus_border_color = focus_border_color
+        self._depth = max(0.0, depth)
         self._state = "normal"  # normal, hover, pressed, focused
 
         # Pre-render button images for each state
@@ -78,13 +80,14 @@ class GlossyButton(tk.Canvas):
 
     def _calc_gradient(self, base, t, is_pressed, bot_override=None):
         """Calculate gradient color at position t (0..1) with smooth transitions."""
+        d = self._depth
         if is_pressed:
-            top_color = self._darken(base, 25)
-            bot_color = self._darken(base, 10)
+            top_color = self._darken(base, int(25 * d))
+            bot_color = self._darken(base, int(10 * d))
             return self._blend(top_color, bot_color, self._smooth(t))
         else:
-            highlight = self._lighten(base, 50)
-            bot_color = bot_override if bot_override is not None else self._darken(base, 30)
+            highlight = self._lighten(base, int(50 * d))
+            bot_color = bot_override if bot_override is not None else self._darken(base, int(30 * d))
             return self._blend(highlight, bot_color, self._smooth(t))
 
     def _render_button(self, base, is_pressed=False, focus_border=False):
@@ -144,25 +147,29 @@ class GlossyButton(tk.Canvas):
         img = Image.alpha_composite(img, body_masked)
 
         # Subtle glossy highlight (soft ellipse, top area)
-        if not is_pressed:
+        d = self._depth
+        if not is_pressed and d > 0:
             gloss = Image.new("RGBA", (w, h), (0, 0, 0, 0))
             gloss_h = body_h // 3
+            gloss_alpha = min(255, int(35 * d))
             ImageDraw.Draw(gloss).ellipse(
                 [inner[0] + 4 * scale, inner[1],
                  inner[2] - 4 * scale, inner[1] + gloss_h],
-                fill=(255, 255, 255, 35)
+                fill=(255, 255, 255, gloss_alpha)
             )
             gloss = gloss.filter(ImageFilter.GaussianBlur(radius=2 * scale))
             img = Image.alpha_composite(img, gloss)
 
         # Thin top edge highlight
-        hl = Image.new("RGBA", (w, h), (0, 0, 0, 0))
-        ImageDraw.Draw(hl).rounded_rectangle(
-            [inner[0] + scale, inner[1], inner[2] - scale, inner[1] + scale],
-            radius=max(1, inner_radius // 2),
-            fill=(255, 255, 255, 50 if not is_pressed else 20)
-        )
-        img = Image.alpha_composite(img, hl)
+        if d > 0:
+            hl_alpha = min(255, int((50 if not is_pressed else 20) * d))
+            hl = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+            ImageDraw.Draw(hl).rounded_rectangle(
+                [inner[0] + scale, inner[1], inner[2] - scale, inner[1] + scale],
+                radius=max(1, inner_radius // 2),
+                fill=(255, 255, 255, hl_alpha)
+            )
+            img = Image.alpha_composite(img, hl)
 
         return img.resize((self._width, self._height), Image.LANCZOS)
 

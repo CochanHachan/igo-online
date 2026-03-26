@@ -40,6 +40,9 @@ def main():
     focus_border_width = 3        # フォーカス縁の太さ（ピクセル）
     focus_border_color = None     # フォーカス縁の色, None=デフォルト青
 
+    # --- 立体感の強さ ---
+    depth = 1.0                   # 0.0=フラット ～ 2.0=非常に立体的
+
     # =================================================================
     # ★ ここまでパラメータ ★
     # =================================================================
@@ -69,6 +72,7 @@ def main():
         font=btn_font,
         focus_border_width=focus_border_width,
         focus_border_color=focus_border_color,
+        depth=depth,
         command=on_click,
         bg="white",
     )
@@ -91,6 +95,7 @@ def main():
         f"フォント: {btn_font}",
         f"フォーカス縁太さ: {focus_border_width}",
         f"フォーカス縁色: {focus_border_color if focus_border_color is not None else 'デフォルト青'}",
+        f"立体感 (depth): {depth}",
     ]
     for p in params:
         tk.Label(info_frame, text=p, fg="#555555", bg="white",
@@ -132,6 +137,20 @@ def main():
                  base_color=(60, 160, 60),
                  focus_border_color=(255, 165, 0),
                  focus_border_width=4,
+                 bg="white").pack(pady=4)
+
+    # フラット（depth=0）
+    GlossyButton(root, text="フラット",
+                 width=160, height=40,
+                 base_color=(60, 160, 60),
+                 depth=0.0,
+                 bg="white").pack(pady=4)
+
+    # 強い立体感（depth=2.0）
+    GlossyButton(root, text="立体感 強",
+                 width=160, height=40,
+                 base_color=(60, 160, 60),
+                 depth=2.0,
                  bg="white").pack(pady=4)
 
     tk.Label(root, text="Tabキーでフォーカス移動、Enter/Spaceでクリック",

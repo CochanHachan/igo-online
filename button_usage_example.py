@@ -31,6 +31,7 @@ def main():
         font=("Yu Gothic UI", 13, "bold"),  # フォント
         focus_border_width=3,               # フォーカス縁の太さ
         focus_border_color=None,            # フォーカス縁の色, None=デフォルト青
+        depth=1.0,                          # 立体感の強さ (0.0=フラット ～ 2.0=非常に立体的)
         command=None,                       # ← クリック時の処理に置き換え
         bg=root.cget("bg"),
     )
@@ -51,6 +52,7 @@ def main():
         font=("Yu Gothic UI", 11, "bold"),  # フォント
         focus_border_width=3,               # フォーカス縁の太さ
         focus_border_color=None,            # フォーカス縁の色, None=デフォルト青
+        depth=1.0,                          # 立体感の強さ (0.0=フラット ～ 2.0=非常に立体的)
         command=None,                       # ← クリック時の処理に置き換え
         bg=root.cget("bg"),
     )
