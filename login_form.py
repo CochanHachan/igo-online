@@ -191,64 +191,70 @@ class LoginForm(tk.Tk):
         super().__init__()
         self.title("\u7881\u83ef")                 # 碁華
         self.configure(bg=self.BG)
-        self.geometry("420x340")
+        self.geometry("400x320")
         self.resizable(False, False)
         self._result = None
         self._build_ui()
 
     def _build_ui(self):
         bg = self.BG
-        fg = "#3a3a2a"
-        label_font = ("Yu Gothic UI", 10)
-        title_font = ("Yu Gothic UI", 18, "bold")
+        fg = "#4a4a3a"
+        label_font = ("Yu Gothic UI", 9)
+        title_font = ("Yu Gothic UI", 16, "bold")
 
         # --- タイトル ---
         tk.Label(self, text="\u7881\u83ef \u30ed\u30b0\u30a4\u30f3",
                  font=title_font,
-                 bg=bg, fg="#2a3a2a").pack(pady=(30, 25))
+                 bg=bg, fg="#3a4a3a").pack(pady=(28, 20))
 
         # --- フォーム ---
         form = tk.Frame(self, bg=bg)
-        form.pack(padx=40, fill="x")
+        form.pack(padx=35, fill="x")
 
         # ハンドルネーム
         tk.Label(form, text="\u30cf\u30f3\u30c9\u30eb\u30cd\u30fc\u30e0",
                  font=label_font,
                  bg=bg, fg=fg, anchor="w").pack(anchor="w")
-        self._name_entry = RoundedEntry(form, width=340, height=36,
+        self._name_entry = RoundedEntry(form, width=320, height=34,
+                                        corner_radius=8,
+                                        border_color="#c8c8c0",
                                         parent_bg=bg)
-        self._name_entry.pack(pady=(2, 8), anchor="w")
+        self._name_entry.pack(pady=(2, 6), anchor="w")
 
         # パスワード
         tk.Label(form, text="\u30d1\u30b9\u30ef\u30fc\u30c9",
                  font=label_font,
                  bg=bg, fg=fg, anchor="w").pack(anchor="w")
-        self._pw_entry = RoundedEntry(form, width=340, height=36,
+        self._pw_entry = RoundedEntry(form, width=320, height=34,
+                                      corner_radius=8,
+                                      border_color="#c8c8c0",
                                       show="\u25cf", parent_bg=bg)
-        self._pw_entry.pack(pady=(2, 20), anchor="w")
+        self._pw_entry.pack(pady=(2, 18), anchor="w")
 
         # --- ボタン ---
         btn_frame = tk.Frame(self, bg=bg)
-        btn_frame.pack(pady=(5, 0))
+        btn_frame.pack()
 
         # ログインボタン（GlossyButton: 緑）
         self._login_btn = GlossyButton(
             btn_frame, text="\u30ed\u30b0\u30a4\u30f3",
-            width=155, height=42,
-            base_color=(50, 150, 50), text_color="white",
-            font=("Yu Gothic UI", 12, "bold"),
+            width=150, height=40,
+            base_color=(60, 145, 60), text_color="white",
+            font=("Yu Gothic UI", 11, "bold"),
             command=self._do_login, bg=bg,
         )
-        self._login_btn.pack(side="left", padx=(0, 8))
+        self._login_btn.pack(side="left", padx=(0, 6))
 
         # アカウント作成ボタン（OutlineButton: 白枠線）
         self._register_btn = OutlineButton(
             btn_frame, text="\u30a2\u30ab\u30a6\u30f3\u30c8\u4f5c\u6210",
-            width=155, height=42,
-            font=("Yu Gothic UI", 11),
+            width=150, height=40,
+            font=("Yu Gothic UI", 10),
+            border_color="#c0c0b8",
+            text_color="#505050",
             command=self._do_register, parent_bg=bg,
         )
-        self._register_btn.pack(side="left", padx=(8, 0))
+        self._register_btn.pack(side="left", padx=(6, 0))
 
         # --- エラーメッセージ ---
         self._msg_label = tk.Label(self, text="", font=("Yu Gothic UI", 10),
