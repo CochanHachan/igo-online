@@ -40,14 +40,15 @@ def main():
     login_btn_color = (55, 130, 55)
     login_btn_text = "\u30ed\u30b0\u30a4\u30f3"
     login_btn_font = ("Yu Gothic UI", 13, "bold")
-    login_btn_depth = 1.0
+    login_btn_depth = 0.6
 
     reg_btn_width = 180
     reg_btn_height = 46
+    reg_btn_corner_radius = 10
     reg_btn_text = "\u30a2\u30ab\u30a6\u30f3\u30c8\u4f5c\u6210"
-    reg_btn_font = ("Yu Gothic UI", 11)
+    reg_btn_font = ("Yu Gothic UI", 12)
     reg_btn_border = "#4a8c4a"
-    reg_btn_text_color = "#4a8c4a"
+    reg_btn_text_color = "#3a6a3a"
 
     root.configure(bg=window_bg)
     root.geometry(f"{window_width}x{window_height}")
@@ -78,7 +79,7 @@ def main():
     pw_entry = RoundedEntry(form, width=entry_width, height=entry_height,
                             border_color=entry_border,
                             focus_border_color=entry_focus_border,
-                            font=entry_font, show="\u25cf", parent_bg=window_bg)
+                            font=entry_font, parent_bg=window_bg)
     pw_entry.pack(pady=(4, 25), anchor="w")
 
     # --- ボタン ---
@@ -93,6 +94,7 @@ def main():
 
     OutlineButton(btn_frame, text=reg_btn_text,
                   width=reg_btn_width, height=reg_btn_height,
+                  corner_radius=reg_btn_corner_radius,
                   border_color=reg_btn_border,
                   text_color=reg_btn_text_color, font=reg_btn_font,
                   parent_bg=window_bg).pack(side="left")

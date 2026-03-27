@@ -140,7 +140,7 @@ class OutlineButton(tk.Canvas):
     """
 
     def __init__(self, master, text="Button", width=150, height=44,
-                 corner_radius=6, bg_color="white", border_color="#4a8c4a",
+                 corner_radius=10, bg_color="white", border_color="#4a8c4a",
                  text_color="#4a8c4a", font=("Yu Gothic UI", 11),
                  command=None, parent_bg="white"):
         super().__init__(master, width=width, height=height,
@@ -241,7 +241,7 @@ class LoginForm(tk.Tk):
             form, width=380, height=42,
             border_color="#c0c0c0",
             focus_border_color=green,
-            show="\u25cf", parent_bg=bg)
+            parent_bg=bg)
         self._pw_entry.pack(pady=(4, 25), anchor="w")
 
         # --- ボタン ---
@@ -254,6 +254,7 @@ class LoginForm(tk.Tk):
             width=180, height=46,
             base_color=(55, 130, 55), text_color="white",
             font=("Yu Gothic UI", 13, "bold"),
+            depth=0.6,
             command=self._do_login, bg=bg,
         )
         self._login_btn.pack(side="left", padx=(0, 10))
@@ -262,9 +263,10 @@ class LoginForm(tk.Tk):
         self._register_btn = OutlineButton(
             btn_frame, text="\u30a2\u30ab\u30a6\u30f3\u30c8\u4f5c\u6210",
             width=180, height=46,
+            corner_radius=10,
             border_color="#4a8c4a",
-            text_color="#4a8c4a",
-            font=("Yu Gothic UI", 11),
+            text_color="#3a6a3a",
+            font=("Yu Gothic UI", 12),
             command=self._do_register, parent_bg=bg,
         )
         self._register_btn.pack(side="left")
