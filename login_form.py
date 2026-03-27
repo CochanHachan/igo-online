@@ -211,7 +211,7 @@ class LoginForm(tk.Tk):
         fg = "#333333"
         green = "#3a7a3a"
         label_font = ("Yu Gothic UI", 10)
-        title_font = ("Yu Gothic UI", 18, "bold")
+        title_font = ("Yu Gothic UI", 20, "bold")
 
         # --- タイトル ---
         tk.Label(self, text="\u7881\u83ef \u30ed\u30b0\u30a4\u30f3",
