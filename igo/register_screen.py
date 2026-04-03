@@ -31,7 +31,6 @@ class RegisterScreen:
 
         form = tk.Frame(container, bg=T("container_bg"))
         form.pack(fill="x")
-        form.columnconfigure(0, weight=1)
 
         _sp = 8  # uniform vertical spacing between field groups
 
@@ -45,12 +44,9 @@ class RegisterScreen:
         ]
         self.entries = {}
         self._handle_warn_label = None
-        row = 0
         for lang_key, entry_key, is_pw in fields:
             tk.Label(form, text=L(lang_key), font=("", 11),
-                     fg=T("text_secondary"), bg=T("container_bg"), anchor="w"
-                     ).grid(row=row, column=0, sticky="ew", pady=(_sp, 2))
-            row += 1
+                     fg=T("text_secondary"), bg=T("container_bg"), anchor="w").pack(fill="x", pady=(_sp, 2))
             if is_pw:
                 _vcmd = (form.register(_validate_ascii), '%P')
                 e = tk.Entry(form, show="*",
@@ -58,32 +54,32 @@ class RegisterScreen:
                 _disable_ime_for(e)
             else:
                 e = tk.Entry(form, **_entry_cfg())
-            e.grid(row=row, column=0, sticky="ew", ipady=4)
-            row += 1
+            e.pack(fill="x", ipady=4)
             self.entries[entry_key] = e
             if entry_key == "handle":
                 self._handle_warn_label = tk.Label(form, text="", font=("", 9),
                     fg=T("error_red"), bg=T("container_bg"), anchor="w")
-                self._handle_warn_label.grid(row=row, column=0, sticky="w", pady=(2, 0))
-                self._handle_warn_label.grid_remove()
-                row += 1
+                self._handle_warn_label.pack(fill="x", pady=0)
+                self._handle_warn_label.pack_forget()
                 _sv = tk.StringVar()
                 e.config(textvariable=_sv)
                 self._handle_sv = _sv
-                def _on_handle_change(*args, _w=self._handle_warn_label):
+                self._handle_entry = e
+                def _on_handle_change(*args, _w=self._handle_warn_label, _e=e):
                     val = self._handle_sv.get()
                     if len(val) > 20:
                         _w.config(text=L("reg_handle_warn"))
-                        _w.grid()
+                        try:
+                            _w.pack(after=_e, fill="x", pady=(2, 0))
+                        except tk.TclError:
+                            pass
                     else:
                         _w.config(text="")
-                        _w.grid_remove()
+                        _w.pack_forget()
                 _sv.trace_add("write", _on_handle_change)
 
         tk.Label(form, text=L("reg_rank"), font=("", 11),
-                 fg=T("text_secondary"), bg=T("container_bg"), anchor="w"
-                 ).grid(row=row, column=0, sticky="ew", pady=(_sp, 2))
-        row += 1
+                 fg=T("text_secondary"), bg=T("container_bg"), anchor="w").pack(fill="x", pady=(_sp, 2))
         _loc_ranks = get_localized_go_ranks()
         self.rank_var = tk.StringVar(value=rank_to_localized("1\u7d1a"))
         style = ttk.Style()
@@ -91,17 +87,15 @@ class RegisterScreen:
         self.rank_combo = ttk.Combobox(form, textvariable=self.rank_var,
             values=_loc_ranks, state="readonly", style="Dark.TCombobox",
             font=("", 11))
-        self.rank_combo.grid(row=row, column=0, sticky="ew", ipady=4)
-        row += 1
+        self.rank_combo.pack(fill="x", ipady=4)
         _apply_combo_listbox_style(self.rank_combo)
 
         self.error_label = tk.Label(form, text="", font=("", 10),
                                      fg=T("error_red"), bg=T("container_bg"))
-        self.error_label.grid(row=row, column=0, sticky="ew", pady=(_sp, 0))
-        row += 1
+        self.error_label.pack(fill="x", pady=(_sp, 0))
 
         btn_frame = tk.Frame(form, bg=T("container_bg"))
-        btn_frame.grid(row=row, column=0, pady=(_sp * 2, _sp))
+        btn_frame.pack(pady=(_sp * 2, _sp))
 
         self._register_btn = GlossyButton(btn_frame, text=L("reg_btn"),
                   width=180, height=40, base_color=(50, 150, 50),
@@ -147,7 +141,6 @@ class RegisterScreen:
             return
 
         initial_elo = rank_to_initial_elo(rank)
-        # サーバーに送るrankは日本語ベース（サブレベルなし）
         base_rank = elo_to_rank(initial_elo)
         import urllib.request as _urlreq, json as _json
         try:
@@ -169,14 +162,6 @@ class RegisterScreen:
                 _result = _json.loads(_resp.read().decode("utf-8"))
             ok = _result.get("success", False)
             err = _result.get("message", "\u30a8\u30e9\u30fc\u304c\u767a\u751f\u3057\u307e\u3057\u305f")
-        except _urlreq.HTTPError as _e:
-            try:
-                _result = _json.loads(_e.read().decode("utf-8"))
-                ok = _result.get("success", False)
-                err = _result.get("message", "\u30a8\u30e9\u30fc\u304c\u767a\u751f\u3057\u307e\u3057\u305f")
-            except Exception:
-                ok = False
-                err = f"HTTP {_e.code}"
         except Exception as _e:
             ok = False
             err = "\u30b5\u30fc\u30d0\u30fc\u306b\u63a5\u7d9a\u3067\u304d\u307e\u305b\u3093"
@@ -192,5 +177,4 @@ class RegisterScreen:
     def reset(self):
         for e in self.entries.values():
             e.delete(0, "end")
-        self.rank_var.set(rank_to_localized("1\u7d1a"))
         self.error_label.config(text="")
