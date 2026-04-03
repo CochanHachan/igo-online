@@ -78,7 +78,6 @@ class RegisterScreen:
                     else:
                         _w.config(text="")
                         _w.grid_remove()
-                        self.error_label.config(text="")
                 _sv.trace_add("write", _on_handle_change)
 
         tk.Label(form, text=L("reg_rank"), font=("", 11),
@@ -185,4 +184,5 @@ class RegisterScreen:
     def reset(self):
         for e in self.entries.values():
             e.delete(0, "end")
+        self.rank_var.set(rank_to_localized("1\u7d1a"))
         self.error_label.config(text="")
