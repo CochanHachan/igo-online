@@ -32,7 +32,7 @@ class RegisterScreen:
         form = tk.Frame(container, bg=T("container_bg"))
         form.pack(fill="x")
 
-        _sp = 8  # uniform vertical spacing between field groups
+        _sp = 8  # 各項目の等間隔スペース
 
         # fields: (lang_key, entry_key, is_pw)
         fields = [
@@ -54,28 +54,22 @@ class RegisterScreen:
                 _disable_ime_for(e)
             else:
                 e = tk.Entry(form, **_entry_cfg())
-            e.pack(fill="x", ipady=4)
+            e.pack(fill="x", ipady=4, pady=(0, 0))
             self.entries[entry_key] = e
             if entry_key == "handle":
                 self._handle_warn_label = tk.Label(form, text="", font=("", 9),
                     fg=T("error_red"), bg=T("container_bg"), anchor="w")
                 self._handle_warn_label.pack(fill="x", pady=0)
-                self._handle_warn_label.pack_forget()
                 _sv = tk.StringVar()
                 e.config(textvariable=_sv)
                 self._handle_sv = _sv
-                self._handle_entry = e
-                def _on_handle_change(*args, _w=self._handle_warn_label, _e=e):
+                def _on_handle_change(*args, _w=self._handle_warn_label):
                     val = self._handle_sv.get()
                     if len(val) > 20:
                         _w.config(text=L("reg_handle_warn"))
-                        try:
-                            _w.pack(after=_e, fill="x", pady=(2, 0))
-                        except tk.TclError:
-                            pass
                     else:
                         _w.config(text="")
-                        _w.pack_forget()
+                        self.error_label.config(text="")
                 _sv.trace_add("write", _on_handle_change)
 
         tk.Label(form, text=L("reg_rank"), font=("", 11),
@@ -87,12 +81,12 @@ class RegisterScreen:
         self.rank_combo = ttk.Combobox(form, textvariable=self.rank_var,
             values=_loc_ranks, state="readonly", style="Dark.TCombobox",
             font=("", 11))
-        self.rank_combo.pack(fill="x", ipady=4)
+        self.rank_combo.pack(fill="x", ipady=4, pady=(0, 0))
         _apply_combo_listbox_style(self.rank_combo)
 
         self.error_label = tk.Label(form, text="", font=("", 10),
                                      fg=T("error_red"), bg=T("container_bg"))
-        self.error_label.pack(fill="x", pady=(_sp, 0))
+        self.error_label.pack(fill="x", pady=(0, 0))
 
         btn_frame = tk.Frame(form, bg=T("container_bg"))
         btn_frame.pack(pady=(_sp, 0))
@@ -125,7 +119,7 @@ class RegisterScreen:
             return
         if len(handle) > 20:
             self.error_label.config(text="\u30cf\u30f3\u30c9\u30eb\u30cd\u30fc\u30e0\u306f20\u5b57\u4ee5\u5185\u3067\u3059\u3002")
-            entry = self.entries["handle"]
+            entry = self.entries["\u30cf\u30f3\u30c9\u30eb\u30cd\u30fc\u30e0"]
             def _delayed_focus():
                 entry.focus_force()
                 entry.config(selectbackground="#FFFF99", selectforeground="black")
@@ -141,6 +135,7 @@ class RegisterScreen:
             return
 
         initial_elo = rank_to_initial_elo(rank)
+        # サーバーに送るrankは日本語ベース（サブレベルなし）
         base_rank = elo_to_rank(initial_elo)
         import urllib.request as _urlreq, json as _json
         try:
