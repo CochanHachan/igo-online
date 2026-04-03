@@ -169,6 +169,14 @@ class RegisterScreen:
                 _result = _json.loads(_resp.read().decode("utf-8"))
             ok = _result.get("success", False)
             err = _result.get("message", "\u30a8\u30e9\u30fc\u304c\u767a\u751f\u3057\u307e\u3057\u305f")
+        except _urlreq.HTTPError as _e:
+            try:
+                _result = _json.loads(_e.read().decode("utf-8"))
+                ok = _result.get("success", False)
+                err = _result.get("message", "\u30a8\u30e9\u30fc\u304c\u767a\u751f\u3057\u307e\u3057\u305f")
+            except Exception:
+                ok = False
+                err = f"HTTP {_e.code}"
         except Exception as _e:
             ok = False
             err = "\u30b5\u30fc\u30d0\u30fc\u306b\u63a5\u7d9a\u3067\u304d\u307e\u305b\u3093"
