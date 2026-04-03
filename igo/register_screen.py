@@ -22,7 +22,7 @@ class RegisterScreen:
         self.parent = parent
         self.app = app
 
-        container = tk.Frame(parent, bg=T("container_bg"), padx=20, pady=(10, 20))
+        container = tk.Frame(parent, bg=T("container_bg"), padx=20, pady=20)
         container.place(relx=0.5, rely=0.5, anchor="center")
 
         tk.Label(container, text=L("reg_title"),
