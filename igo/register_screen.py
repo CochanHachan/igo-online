@@ -22,7 +22,7 @@ class RegisterScreen:
         self.parent = parent
         self.app = app
 
-        container = tk.Frame(parent, bg=T("container_bg"), padx=40, pady=10)
+        container = tk.Frame(parent, bg=T("container_bg"), padx=40, pady=(10, 20))
         container.place(relx=0.5, rely=0.5, anchor="center")
 
         tk.Label(container, text=L("reg_title"),
@@ -95,7 +95,7 @@ class RegisterScreen:
         self.error_label.pack(fill="x", pady=(_sp, 0))
 
         btn_frame = tk.Frame(form, bg=T("container_bg"))
-        btn_frame.pack(pady=(_sp * 2, _sp))
+        btn_frame.pack(pady=(_sp, 0))
 
         self._register_btn = GlossyButton(btn_frame, text=L("reg_btn"),
                   width=180, height=40, base_color=(50, 150, 50),
