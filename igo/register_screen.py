@@ -59,17 +59,21 @@ class RegisterScreen:
             if entry_key == "handle":
                 self._handle_warn_label = tk.Label(form, text="", font=("", 9),
                     fg=T("error_red"), bg=T("container_bg"), anchor="w")
-                self._handle_warn_label.pack(fill="x", pady=0)
                 _sv = tk.StringVar()
                 e.config(textvariable=_sv)
                 self._handle_sv = _sv
-                def _on_handle_change(*args, _w=self._handle_warn_label):
+                self._handle_entry = e
+                def _on_handle_change(*args, _w=self._handle_warn_label, _e=e):
                     val = self._handle_sv.get()
                     if len(val) > 20:
                         _w.config(text=L("reg_handle_warn"))
+                        try:
+                            _w.pack(after=_e, fill="x", pady=(2, 0))
+                        except tk.TclError:
+                            pass
                     else:
                         _w.config(text="")
-                        self.error_label.config(text="")
+                        _w.pack_forget()
                 _sv.trace_add("write", _on_handle_change)
 
         tk.Label(form, text=L("reg_rank"), font=("", 11),
