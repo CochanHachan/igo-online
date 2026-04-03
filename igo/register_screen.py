@@ -132,7 +132,7 @@ class RegisterScreen:
             return
         if len(handle) > 20:
             self.error_label.config(text="\u30cf\u30f3\u30c9\u30eb\u30cd\u30fc\u30e0\u306f20\u5b57\u4ee5\u5185\u3067\u3059\u3002")
-            entry = self.entries["\u30cf\u30f3\u30c9\u30eb\u30cd\u30fc\u30e0"]
+            entry = self.entries["handle"]
             def _delayed_focus():
                 entry.focus_force()
                 entry.config(selectbackground="#FFFF99", selectforeground="black")
