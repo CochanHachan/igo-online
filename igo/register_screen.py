@@ -54,6 +54,8 @@ class RegisterScreen:
                 _disable_ime_for(e)
             else:
                 e = tk.Entry(form, **_entry_cfg())
+            if entry_key == "email":
+                _disable_ime_for(e)
             e.pack(fill="x", ipady=4, pady=(0, 0))
             self.entries[entry_key] = e
             if entry_key == "handle":
